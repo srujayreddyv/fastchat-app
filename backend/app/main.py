@@ -2,12 +2,13 @@ from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from .database import get_db, engine
-from .routers import presence
+from .routers import presence, websocket
 
 app = FastAPI(title="FastChat API", version="1.0.0")
 
 # Include routers
 app.include_router(presence.router)
+app.include_router(websocket.router)
 
 @app.get("/health")
 def health():

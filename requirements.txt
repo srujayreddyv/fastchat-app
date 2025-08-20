@@ -24,6 +24,9 @@ uvloop==0.21.0
 watchfiles==1.1.0
 websockets==15.0.1
 
+# Database
+psycopg2-binary==2.9.9
+
 # Database migrations
 alembic==1.13.1
 

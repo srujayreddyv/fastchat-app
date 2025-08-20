@@ -66,6 +66,20 @@ Real-time chat app built with **FastAPI**, **PostgreSQL**, and **React**.
 
 ### Option 2: Local Development
 
+#### Database Setup (Neon)
+
+1. Create a Neon database:
+
+   - Go to [Neon Console](https://console.neon.tech/)
+   - Sign up/Login and create a new project
+   - Copy your connection string
+
+2. Set up environment variables:
+   ```bash
+   cp env.example .env
+   # Edit .env and add your Neon DATABASE_URL
+   ```
+
 #### Backend Setup
 
 1. Create and activate virtual environment:
@@ -81,10 +95,11 @@ Real-time chat app built with **FastAPI**, **PostgreSQL**, and **React**.
    pip install -r requirements.txt
    ```
 
-3. Set up PostgreSQL database (or use Docker):
+3. Run database migrations:
 
    ```bash
-   docker run -d --name postgres -e POSTGRES_DB=fastchat -e POSTGRES_USER=fastchat -e POSTGRES_PASSWORD=fastchat -p 5432:5432 postgres:15
+   cd backend
+   alembic upgrade head
    ```
 
 4. Run the backend:
@@ -125,6 +140,7 @@ alembic upgrade head
 ## API Endpoints
 
 - `GET /health` - Health check endpoint
+- `GET /health/db` - Database connectivity check
 - `GET /docs` - Interactive API documentation (Swagger UI)
 
 ## Project Structure
