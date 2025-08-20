@@ -1,4 +1,5 @@
 import { getUserIdentity, UserIdentity } from '../utils/identity';
+import { useChatStore } from '../stores/chat';
 
 export interface WebSocketMessage {
   type: string;
@@ -14,13 +15,13 @@ export interface OnlineUser {
 export interface ChatMessage {
   type: 'MSG';
   content: string;
-  chat_id: string;
+  to: string;
+  message_id?: string;
   timestamp?: string;
 }
 
 export interface TypingMessage {
   type: 'TYPING';
-  chat_id: string;
   is_typing: boolean;
 }
 
@@ -38,7 +39,7 @@ class WebSocketClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
-  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private heartbeatInterval: number | null = null;
   private eventHandlers: Map<string, WebSocketEventHandler[]> = new Map();
   private isConnecting = false;
   private identity: UserIdentity;
@@ -56,7 +57,7 @@ class WebSocketClient {
     this.isConnecting = true;
 
     try {
-      const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8000/ws`;
+      const wsUrl = `ws://${window.location.hostname}:8000/ws`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
@@ -138,6 +139,7 @@ class WebSocketClient {
   // Handle incoming messages
   private handleMessage(data: any): void {
     const { type, ...payload } = data;
+    const chatStore = useChatStore.getState();
 
     switch (type) {
       case 'HELLO_ACK':
@@ -150,19 +152,67 @@ class WebSocketClient {
         this.emit('chat_opened', payload);
         break;
       case 'MSG':
-        this.emit('message', payload);
+        this.handleChatMessage(payload);
         break;
       case 'TYPING':
-        this.emit('typing', payload);
+        this.handleTypingIndicator(payload);
         break;
       case 'ERROR':
-        this.emit('error', payload);
+        this.handleError(payload);
         break;
       case 'PONG':
         this.emit('pong', payload);
         break;
       default:
         console.warn('Unknown message type:', type);
+    }
+  }
+
+  // Handle chat messages
+  private handleChatMessage(payload: any): void {
+    const chatStore = useChatStore.getState();
+    
+    // Add received message to store
+    chatStore.addMessage({
+      from: payload.from,
+      to: payload.to,
+      content: payload.content,
+      status: 'sent'
+    });
+
+    // Send acknowledgment if message_id is provided
+    if (payload.message_id) {
+      this.send({
+        type: 'MSG_ACK',
+        message_id: payload.message_id
+      });
+    }
+
+    this.emit('message', payload);
+  }
+
+  // Handle typing indicators
+  private handleTypingIndicator(payload: any): void {
+    const chatStore = useChatStore.getState();
+    chatStore.setTyping(payload.user_id, payload.is_typing);
+    this.emit('typing', payload);
+  }
+
+  // Handle errors
+  private handleError(payload: any): void {
+    console.error('WebSocket error received:', payload);
+    
+    if (payload.type === 'VALIDATION') {
+      this.emit('error', new Error(`Validation error: ${payload.message}`));
+    } else if (payload.type === 'MESSAGE_FAILED') {
+      // Update message status to error
+      const chatStore = useChatStore.getState();
+      if (payload.message_id) {
+        chatStore.updateMessageStatus(payload.message_id, 'error');
+      }
+      this.emit('error', new Error(`Message failed: ${payload.message}`));
+    } else {
+      this.emit('error', new Error(payload.message || 'Unknown error'));
     }
   }
 
@@ -186,20 +236,20 @@ class WebSocketClient {
   }
 
   // Send chat message
-  sendMessage(chatId: string, content: string): void {
+  sendMessage(to: string, content: string, messageId?: string): void {
     const message: ChatMessage = {
       type: 'MSG',
-      chat_id: chatId,
-      content
+      to,
+      content,
+      message_id: messageId
     };
     this.send(message);
   }
 
   // Send typing indicator
-  sendTyping(chatId: string, isTyping: boolean): void {
+  sendTyping(isTyping: boolean): void {
     const message: TypingMessage = {
       type: 'TYPING',
-      chat_id: chatId,
       is_typing: isTyping
     };
     this.send(message);

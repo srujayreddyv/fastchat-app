@@ -19,17 +19,27 @@ import {
   Chat as ChatIcon 
 } from '@mui/icons-material';
 import { usePresenceStore } from '../stores/presence';
+import { useChatStore } from '../stores/chat';
 import { websocketClient } from '../services/websocket';
 import { getUserIdentity } from '../utils/identity';
 
 const OnlineUsers: React.FC = () => {
   const { onlineUsers, currentUser } = usePresenceStore();
+  const { selectedUser, setSelectedUser } = useChatStore();
   const identity = getUserIdentity();
 
   const handleUserClick = (userId: string, displayName: string) => {
     // Don't allow chatting with yourself
     if (userId === identity.id) return;
     
+    // Set selected user in chat store
+    setSelectedUser({
+      user_id: userId,
+      display_name: displayName,
+      online: true
+    });
+    
+    // Open chat via WebSocket
     websocketClient.openChat(userId, displayName);
   };
 
@@ -54,11 +64,18 @@ const OnlineUsers: React.FC = () => {
               <ListItem
                 key={user.user_id}
                 alignItems="center"
+                selected={selectedUser?.user_id === user.user_id}
                 sx={{ 
                   cursor: 'pointer',
                   '&:hover': { bgcolor: 'action.hover' },
                   borderRadius: 1,
-                  mb: 1
+                  mb: 1,
+                  '&.Mui-selected': {
+                    bgcolor: 'primary.light',
+                    '&:hover': {
+                      bgcolor: 'primary.light',
+                    }
+                  }
                 }}
                 onClick={() => handleUserClick(user.user_id, user.display_name)}
               >

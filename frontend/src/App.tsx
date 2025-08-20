@@ -1,21 +1,25 @@
-import { useEffect } from 'react';
-import { 
-  Container, 
-  Box, 
-  Typography, 
-  Grid, 
-  Card, 
+import { useEffect, useState } from 'react';
+import {
+  Container,
+  Box,
+  Typography,
+  Grid,
+  Card,
   CardContent,
   ThemeProvider,
   createTheme,
-  CssBaseline
+  CssBaseline,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import { Chat as ChatIcon } from '@mui/icons-material';
 import ConnectionBanner from './components/ConnectionBanner';
 import OnlineUsers from './components/OnlineUsers';
+import ChatPane from './components/ChatPane';
 import { websocketClient } from './services/websocket';
 import { heartbeatService } from './services/heartbeat';
 import { usePresenceStore } from './stores/presence';
+import { useChatStore } from './stores/chat';
 import { getUserIdentity } from './utils/identity';
 
 // Create a custom theme
@@ -31,13 +35,22 @@ const theme = createTheme({
 });
 
 function App() {
-  const { 
-    setOnlineUsers, 
-    addOnlineUser, 
-    removeOnlineUser, 
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [showError, setShowError] = useState(false);
+  
+  const {
+    setOnlineUsers,
+    addOnlineUser,
+    removeOnlineUser,
     updateConnectionStatus,
-    setCurrentUser 
+    setCurrentUser
   } = usePresenceStore();
+
+  const {
+    selectedUser,
+    getMessagesForUser,
+    isUserTyping
+  } = useChatStore();
 
   useEffect(() => {
     const identity = getUserIdentity();
@@ -74,80 +87,105 @@ function App() {
       }
     };
 
-    const handleError = (error: any) => {
-      console.error('WebSocket error:', error);
-    };
+               const handleError = (error: any) => {
+             console.error('WebSocket error:', error);
+             setErrorMessage(error.message || 'An error occurred');
+             setShowError(true);
+           };
 
-    // Register event handlers
-    websocketClient.on('connected', handleConnected);
-    websocketClient.on('disconnected', handleDisconnected);
-    websocketClient.on('connecting', handleConnecting);
-    websocketClient.on('presence', handlePresence);
-    websocketClient.on('error', handleError);
+               // Chat event handlers
+           const handleMessage = (data: any) => {
+             console.log('Message received:', data);
+           };
 
-    // Cleanup on unmount
-    return () => {
-      websocketClient.off('connected', handleConnected);
-      websocketClient.off('disconnected', handleDisconnected);
-      websocketClient.off('connecting', handleConnecting);
-      websocketClient.off('presence', handlePresence);
-      websocketClient.off('error', handleError);
-      
-      websocketClient.disconnect();
-      heartbeatService.stop();
-    };
-  }, [setOnlineUsers, addOnlineUser, removeOnlineUser, updateConnectionStatus, setCurrentUser]);
+           const handleTyping = (data: any) => {
+             console.log('Typing indicator:', data);
+           };
+
+           // Register event handlers
+           websocketClient.on('connected', handleConnected);
+           websocketClient.on('disconnected', handleDisconnected);
+           websocketClient.on('connecting', handleConnecting);
+           websocketClient.on('presence', handlePresence);
+           websocketClient.on('message', handleMessage);
+           websocketClient.on('typing', handleTyping);
+           websocketClient.on('error', handleError);
+
+           // Cleanup on unmount
+           return () => {
+             websocketClient.off('connected', handleConnected);
+             websocketClient.off('disconnected', handleDisconnected);
+             websocketClient.off('connecting', handleConnecting);
+             websocketClient.off('presence', handlePresence);
+             websocketClient.off('message', handleMessage);
+             websocketClient.off('typing', handleTyping);
+             websocketClient.off('error', handleError);
+
+             websocketClient.disconnect();
+             heartbeatService.stop();
+           };
+         }, [setOnlineUsers, addOnlineUser, removeOnlineUser, updateConnectionStatus, setCurrentUser]);
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Box sx={{ minHeight: '100vh', bgcolor: 'grey.100' }}>
-        <ConnectionBanner />
-        
-        <Container maxWidth="lg" sx={{ py: 4, pt: 8 }}>
-          <Box textAlign="center" mb={4}>
-            <Typography variant="h3" component="h1" gutterBottom fontWeight="bold">
-              FastChat 🚀
-            </Typography>
-            <Typography variant="h6" color="text.secondary">
-              Real-time chat with live presence updates
-            </Typography>
-          </Box>
+    <>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box sx={{ minHeight: '100vh', bgcolor: 'grey.100' }}>
+          <ConnectionBanner />
           
-          <Grid container spacing={3}>
-            <Grid item xs={12} lg={8}>
-              <Card elevation={2}>
-                <CardContent sx={{ p: 3 }}>
-                  <Box display="flex" alignItems="center" gap={1} mb={2}>
-                    <ChatIcon color="primary" />
-                    <Typography variant="h5" component="h2">
-                      Chat Area
-                    </Typography>
-                  </Box>
-                  <Box 
-                    sx={{ 
-                      bgcolor: 'grey.50', 
-                      p: 3, 
-                      borderRadius: 1,
-                      textAlign: 'center'
-                    }}
-                  >
-                    <Typography color="text.secondary">
-                      Select a user from the online users list to start chatting
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
+          <Container maxWidth="lg" sx={{ py: 4, pt: 8 }}>
+            <Box textAlign="center" mb={4}>
+              <Typography variant="h3" component="h1" gutterBottom fontWeight="bold">
+                FastChat 🚀
+              </Typography>
+              <Typography variant="h6" color="text.secondary">
+                Real-time chat with live presence updates
+              </Typography>
+            </Box>
             
-            <Grid item xs={12} lg={4}>
-              <OnlineUsers />
+            <Grid container spacing={3}>
+              <Grid item xs={12} lg={8}>
+                <ChatPane
+                  selectedUser={selectedUser}
+                  onSendMessage={(message) => {
+                    if (selectedUser) {
+                      websocketClient.sendMessage(selectedUser.user_id, message);
+                    }
+                  }}
+                  messages={selectedUser ? getMessagesForUser(selectedUser.user_id) : []}
+                  isTyping={selectedUser ? isUserTyping(selectedUser.user_id) : false}
+                  onTyping={(isTyping) => {
+                    websocketClient.sendTyping(isTyping);
+                  }}
+                  connectionStatus={usePresenceStore.getState().connectionStatus}
+                />
+              </Grid>
+
+              <Grid item xs={12} lg={4}>
+                <OnlineUsers />
+              </Grid>
             </Grid>
-          </Grid>
-        </Container>
-      </Box>
-    </ThemeProvider>
+          </Container>
+        </Box>
+      </ThemeProvider>
+
+      {/* Error Snackbar */}
+      <Snackbar
+        open={showError}
+        autoHideDuration={6000}
+        onClose={() => setShowError(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setShowError(false)}
+          severity="error"
+          sx={{ width: '100%' }}
+        >
+          {errorMessage}
+        </Alert>
+      </Snackbar>
+    </>
   );
 }
 
-export default App
+export default App;
