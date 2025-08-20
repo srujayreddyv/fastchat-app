@@ -1,14 +1,32 @@
-# FastChat
+# FastChat 🚀
 
-Real-time chat app built with **FastAPI**, **PostgreSQL**, and **React**.
+Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**.
 
 ## Features
 
-- User signup/login
-- Real-time messaging (WebSocket)
-- Presence tracking (who's online)
-- PostgreSQL database with SQLAlchemy
-- React frontend with WebSocket integration
+- **Real-time messaging** via WebSocket
+- **Live presence tracking** (who's online)
+- **Professional UI** with Material-UI
+- **Auto-reconnection** with exponential backoff
+- **Typing indicators** and message status
+- **Responsive design** for all devices
+- **Production-ready** Docker deployment
+
+## Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │    Backend      │    │   Database      │
+│   (React)       │    │   (FastAPI)     │    │ (PostgreSQL)    │
+│                 │    │                 │    │                 │
+│ • ChatPane      │    │ • REST API      │    │ • users_online  │
+│ • OnlineUsers   │    │ • WebSocket     │    │ • chat_messages │
+│ • Material-UI   │    │ • Presence      │    │ • user_sessions │
+│ • Zustand Store │    │ • SQLAlchemy    │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+📖 **[Full Architecture Documentation](docs/chat_app_architecture.md)**
 
 ## Tech Stack
 
@@ -26,7 +44,8 @@ Real-time chat app built with **FastAPI**, **PostgreSQL**, and **React**.
 - **React 18** - UI library
 - **TypeScript** - Type-safe JavaScript
 - **Vite** - Fast build tool
-- **Tailwind CSS** - Utility-first CSS framework
+- **Material-UI** - Professional UI components
+- **Zustand** - State management
 
 ### Development Tools
 
@@ -36,13 +55,41 @@ Real-time chat app built with **FastAPI**, **PostgreSQL**, and **React**.
 - **Prettier** - Code formatter
 - **Docker** - Containerization
 
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Node.js 18+
-- Docker & Docker Compose (optional)
+- PostgreSQL (Neon recommended)
+- Docker & Docker Compose
+
+### 🚀 Quick Start (5 minutes)
+
+1. **Clone and setup**
+
+   ```bash
+   git clone <repository-url>
+   cd fastchat-app
+   cp env.example .env
+   # Edit .env with your DATABASE_URL
+   ```
+
+2. **Start with Docker**
+
+   ```bash
+   make up
+   ```
+
+3. **Open in browser**
+
+   - Frontend: http://localhost:3000
+   - API Docs: http://localhost:8000/docs
+
+4. **Test the app**
+   ```bash
+   python scripts/manual_test.py
+   ```
 
 ### Option 1: Docker (Recommended)
 
@@ -189,11 +236,45 @@ alembic revision --autogenerate -m "Description"
 alembic upgrade head
 ```
 
-## API Endpoints
+## API Documentation
 
-- `GET /health` - Health check endpoint
-- `GET /health/db` - Database connectivity check
-- `GET /docs` - Interactive API documentation (Swagger UI)
+### REST Endpoints
+
+| Endpoint                   | Method | Description                   |
+| -------------------------- | ------ | ----------------------------- |
+| `GET /health`              | GET    | Health check endpoint         |
+| `GET /health/db`           | GET    | Database connectivity check   |
+| `POST /presence/heartbeat` | POST   | Update user presence          |
+| `GET /presence/online`     | GET    | Get online users list         |
+| `GET /docs`                | GET    | Interactive API documentation |
+
+### WebSocket Protocol
+
+FastChat uses WebSocket for real-time communication:
+
+- **Connection**: `ws://localhost:8000/ws`
+- **Message Format**: JSON
+- **Protocol**: [WebSocket Protocol Documentation](docs/websocket_protocol.md)
+
+#### Key Message Types:
+
+- `HELLO` - Establish user identity
+- `MSG` - Send/receive chat messages
+- `TYPING` - Typing indicators
+- `PRESENCE` - Online users updates
+- `ERROR` - Error handling
+
+### Example Usage
+
+```bash
+# Test API endpoints
+curl http://localhost:8000/health
+curl http://localhost:8000/presence/online
+
+# Test WebSocket (using wscat)
+wscat -c ws://localhost:8000/ws
+{"type":"HELLO","data":{"user_id":"test-123","display_name":"Test User"}}
+```
 
 ## Project Structure
 
@@ -217,13 +298,52 @@ fastchat-app/
 └── docs/                   # Documentation
 ```
 
+## Known Limitations
+
+### Current Limitations
+
+- **No persistent authentication** - Users are identified by UUID only
+- **No message history** - Messages are not stored in database
+- **No file sharing** - Text messages only
+- **No group chats** - 1:1 conversations only
+- **No message encryption** - Messages are not end-to-end encrypted
+- **No offline support** - Requires active connection
+
+### Planned Features
+
+- [ ] User authentication with JWT
+- [ ] Message persistence and history
+- [ ] File and image sharing
+- [ ] Group chat support
+- [ ] Message encryption
+- [ ] Offline message queuing
+- [ ] Push notifications
+- [ ] User profiles and avatars
+
+### Technical Debt
+
+- WebSocket error handling needs improvement
+- UUID serialization issues in backend
+- Missing comprehensive test coverage
+- No rate limiting implementation
+- Limited error recovery mechanisms
+
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Run tests and linting
-5. Submit a pull request
+4. Run tests and linting (`make lint`)
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+### Development Guidelines
+
+- Follow the existing code style (Black for Python, Prettier for JS/TS)
+- Add tests for new features
+- Update documentation for API changes
+- Ensure Docker builds work correctly
 
 ## License
 
