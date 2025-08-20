@@ -17,6 +17,7 @@ async def websocket_endpoint(websocket: WebSocket):
     display_name: str = ""
     
     try:
+        # Accept the WebSocket connection first
         await websocket.accept()
         logger.info("WebSocket connection accepted")
         
@@ -51,6 +52,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         message="HELLO message must be sent first"
                     )
                     await websocket.send_text(json.dumps(error_msg.dict()))
+                    return  # Close connection after error
                     
             except json.JSONDecodeError:
                 error_msg = ErrorMessage(
@@ -58,6 +60,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     message="Invalid JSON format"
                 )
                 await websocket.send_text(json.dumps(error_msg.dict()))
+                return  # Close connection after error
         
         # Main message handling loop
         while True:

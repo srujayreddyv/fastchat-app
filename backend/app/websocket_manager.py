@@ -42,7 +42,7 @@ class ConnectionManager:
     
     async def connect(self, websocket: WebSocket, user_id: UUID, display_name: str):
         """Connect a new WebSocket client"""
-        await websocket.accept()
+        # WebSocket is already accepted in the router
         self.active_connections[user_id] = websocket
         self.user_info[user_id] = display_name
         self.last_ping[user_id] = datetime.utcnow()
