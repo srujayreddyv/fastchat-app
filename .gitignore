@@ -2,15 +2,22 @@
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.sqlite3
 
-# Node
-node_modules/
-dist/
-
-# Env & local configs
+# Environment
 .env
-backend/.env
-frontend/.env
 
-# macOS
+# Node / React
+node_modules/
+build/
+dist/
+.npm/
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# OS
 .DS_Store
