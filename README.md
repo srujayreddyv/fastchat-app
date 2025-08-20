@@ -53,16 +53,68 @@ Real-time chat app built with **FastAPI**, **PostgreSQL**, and **React**.
    cd fastchat-app
    ```
 
-2. Start all services:
+2. Set up environment variables:
 
    ```bash
-   docker-compose -f infra/docker-compose.yml up
+   cp env.example .env
+   # Edit .env with your DATABASE_URL and other settings
    ```
 
-3. Access the application:
+3. Start all services:
+
+   ```bash
+   make up
+   ```
+
+4. Access the application:
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
    - API Documentation: http://localhost:8000/docs
+
+### Docker Commands
+
+The project includes a comprehensive Makefile for easy Docker operations:
+
+```bash
+# Start services
+make up
+
+# Stop services
+make down
+
+# View logs
+make logs
+make logs-backend
+make logs-frontend
+
+# Build images
+make build
+make build-backend
+make build-frontend
+
+# Database operations
+make migrate
+make migrate-up
+make migrate-down
+
+# Testing
+make test
+make test-frontend
+make lint
+
+# Maintenance
+make clean
+make prune
+make shell-backend
+make shell-frontend
+
+# Status
+make status
+make health
+
+# Show all available commands
+make help
+```
 
 ### Option 2: Local Development
 
