@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Dict, Set, Optional, List
 from uuid import UUID, uuid4
@@ -10,6 +11,8 @@ from .websocket_dtos import (
     TypingMessage, ErrorMessage, PresenceMessage, ChatOpenedMessage,
     WebSocketMessage
 )
+from .rate_limiter import rate_limiter
+from .metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,9 @@ class ConnectionManager:
         self.user_info[user_id] = display_name
         self.last_ping[user_id] = datetime.utcnow()
         
+        # Record metrics
+        metrics.record_connection(user_id)
+        
         logger.info(f"User {display_name} ({user_id}) connected")
         
         # Broadcast presence update
@@ -63,6 +69,12 @@ class ConnectionManager:
             
             # Clean up chat sessions
             await self.cleanup_user_chats(user_id)
+            
+            # Reset rate limits
+            rate_limiter.reset_user_limits(user_id)
+            
+            # Record metrics
+            metrics.record_disconnection(user_id)
             
             logger.info(f"User {display_name} ({user_id}) disconnected")
             
@@ -146,16 +158,30 @@ class ConnectionManager:
     
     async def handle_message(self, websocket: WebSocket, data: dict) -> Optional[dict]:
         """Handle incoming WebSocket message"""
+        start_time = time.time()
         try:
             message_type = data.get("type")
             
             # Get user_id from websocket connection
             user_id = self.get_user_id_by_websocket(websocket)
             if not user_id:
+                metrics.record_error("NOT_CONNECTED")
                 return ErrorMessage(
                     error_code="NOT_CONNECTED",
                     message="Not connected to WebSocket"
                 ).dict()
+            
+            # Check rate limits
+            if not rate_limiter.check_rate_limit(user_id, message_type):
+                metrics.record_rate_limit_hit(user_id)
+                return ErrorMessage(
+                    error_code="RATE_LIMITED",
+                    message="Rate limit exceeded. Please slow down."
+                ).dict()
+            
+            # Record message metrics
+            processing_time = time.time() - start_time
+            metrics.record_message(user_id, message_type, processing_time)
             
             if message_type == MessageType.HELLO:
                 return await self.handle_hello(data)
@@ -165,13 +191,18 @@ class ConnectionManager:
                 return await self.handle_chat_message(data, user_id)
             elif message_type == MessageType.TYPING:
                 return await self.handle_typing(data, user_id)
+            elif message_type == MessageType.PING:
+                return await self.handle_ping(data, user_id)
             else:
+                metrics.record_error("UNKNOWN_MESSAGE_TYPE", user_id)
                 return ErrorMessage(
                     error_code="UNKNOWN_MESSAGE_TYPE",
                     message=f"Unknown message type: {message_type}"
                 ).dict()
                 
         except Exception as e:
+            processing_time = time.time() - start_time
+            metrics.record_error("INTERNAL_ERROR", user_id if 'user_id' in locals() else None)
             logger.error(f"Error handling message: {e}")
             return ErrorMessage(
                 error_code="INTERNAL_ERROR",
@@ -283,6 +314,21 @@ class ConnectionManager:
         except Exception as e:
             return ErrorMessage(
                 error_code="INVALID_TYPING",
+                message=str(e)
+            ).dict()
+    
+    async def handle_ping(self, data: dict, user_id: UUID) -> Optional[dict]:
+        """Handle PING message"""
+        try:
+            # Update last ping time
+            self.last_ping[user_id] = datetime.utcnow()
+            
+            # Return PONG response
+            return {"type": "PONG"}
+            
+        except Exception as e:
+            return ErrorMessage(
+                error_code="INVALID_PING",
                 message=str(e)
             ).dict()
     

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
 from .database import get_db, engine
-from .routers import presence, websocket
+from .routers import presence, websocket, metrics
 
 app = FastAPI(title="FastChat API", version="1.0.0")
 
@@ -21,6 +21,7 @@ app.add_middleware(
 # Include routers
 app.include_router(presence.router)
 app.include_router(websocket.router)
+app.include_router(metrics.router)
 
 @app.get("/health")
 def health():

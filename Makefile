@@ -35,8 +35,12 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test        - Run backend tests"
+	@echo "  make test-cov    - Run tests with coverage report"
+	@echo "  make test-unit   - Run unit tests only"
+	@echo "  make test-integration - Run integration tests only"
 	@echo "  make test-frontend - Run frontend tests"
 	@echo "  make lint        - Run linting checks"
+	@echo "  make format      - Format code"
 
 # Development commands
 .PHONY: up
@@ -121,6 +125,21 @@ test:
 	@echo "Running backend tests..."
 	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend python -m pytest
 
+.PHONY: test-cov
+test-cov:
+	@echo "Running backend tests with coverage..."
+	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend python -m pytest --cov=app --cov-report=html
+
+.PHONY: test-unit
+test-unit:
+	@echo "Running unit tests..."
+	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend python -m pytest tests/test_api.py tests/test_rate_limiting.py tests/test_metrics.py -v
+
+.PHONY: test-integration
+test-integration:
+	@echo "Running integration tests..."
+	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend python -m pytest tests/test_websocket.py -v
+
 .PHONY: test-frontend
 test-frontend:
 	@echo "Running frontend tests..."
@@ -134,6 +153,15 @@ lint:
 	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend ruff check .
 	@echo "Frontend linting..."
 	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec frontend npm run lint
+
+.PHONY: format
+format:
+	@echo "Formatting code..."
+	@echo "Backend formatting..."
+	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend black .
+	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec backend ruff check --fix .
+	@echo "Frontend formatting..."
+	docker-compose -f $(COMPOSE_FILE) -p $(PROJECT_NAME) exec frontend npm run format
 
 # Status commands
 .PHONY: status

@@ -6,10 +6,14 @@ Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**
 
 - **Real-time messaging** via WebSocket
 - **Live presence tracking** (who's online)
+- **Typing indicators** and message status
 - **Professional UI** with Material-UI
 - **Auto-reconnection** with exponential backoff
-- **Typing indicators** and message status
 - **Responsive design** for all devices
+- **Rate limiting** protection against spam
+- **Real-time metrics** and performance monitoring
+- **Comprehensive testing** with pytest
+- **CI/CD pipeline** with GitHub Actions
 - **Production-ready** Docker deployment
 
 ## Architecture
@@ -54,6 +58,8 @@ Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**
 - **ESLint** - JavaScript/TypeScript linter
 - **Prettier** - Code formatter
 - **Docker** - Containerization
+- **Pytest** - Testing framework
+- **GitHub Actions** - CI/CD automation
 
 ## Quick Start
 
@@ -223,10 +229,52 @@ make help
 
 ## Development
 
+### Running Tests
+
+```bash
+# Backend tests
+cd backend
+pytest tests/ -v --cov=app --cov-report=html
+
+# Run specific test categories
+pytest tests/test_api.py -v          # API endpoint tests
+pytest tests/test_websocket.py -v    # WebSocket integration tests
+pytest tests/test_rate_limiting.py -v # Rate limiting tests
+pytest tests/test_metrics.py -v      # Metrics collection tests
+
+# Frontend tests
+cd frontend
+npm test
+```
+
 ### Code Quality
 
 - **Python**: Run `black .` to format code, `ruff check .` to lint
 - **Frontend**: Run `npm run lint` to lint, `npm run format` to format
+
+### Quality & Resilience Features
+
+#### Rate Limiting
+
+- **Message Rate**: 60 messages per minute per user
+- **Typing Indicators**: 10 per minute per user
+- **Ping Messages**: 30 per minute per user
+- **Automatic Cleanup**: Old timestamps cleaned every 5 minutes
+
+#### Metrics Collection
+
+- **Connection Tracking**: Total, active, and peak connections
+- **Message Analytics**: Counts by type and processing times
+- **Error Monitoring**: Error rates and types
+- **Performance Metrics**: Messages per second, connections per minute
+- **Time-based Stats**: Hourly and daily aggregations
+
+#### Testing Coverage
+
+- **Unit Tests**: API endpoints, WebSocket handlers, rate limiting
+- **Integration Tests**: WebSocket communication, message flow
+- **Mock Testing**: Isolated component testing with mock WebSockets
+- **Coverage Reporting**: HTML coverage reports with pytest-cov
 
 ### Database Migrations
 
@@ -246,6 +294,10 @@ alembic upgrade head
 | `GET /health/db`           | GET    | Database connectivity check   |
 | `POST /presence/heartbeat` | POST   | Update user presence          |
 | `GET /presence/online`     | GET    | Get online users list         |
+| `GET /metrics/`            | GET    | Application metrics           |
+| `GET /metrics/user/{id}`   | GET    | User-specific metrics         |
+| `GET /metrics/hourly`      | GET    | Hourly statistics             |
+| `GET /metrics/daily`       | GET    | Daily statistics              |
 | `GET /docs`                | GET    | Interactive API documentation |
 
 ### WebSocket Protocol
