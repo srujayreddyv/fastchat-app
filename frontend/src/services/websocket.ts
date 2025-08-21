@@ -43,6 +43,10 @@ class WebSocketClient {
   private eventHandlers: Map<string, WebSocketEventHandler[]> = new Map();
   private isConnecting = false;
   private identity: UserIdentity;
+  private messageQueue: WebSocketMessage[] = [];
+  private isConnectionReady = false;
+  private connectionAttemptTime: number = 0;
+  private connectionTimeout: number | null = null;
 
   constructor() {
     this.identity = getUserIdentity();
@@ -50,70 +54,133 @@ class WebSocketClient {
 
   // Connect to WebSocket
   async connect(): Promise<void> {
+    // Prevent rapid reconnection attempts (within 500ms instead of 1000ms)
+    const now = Date.now();
+    if (now - this.connectionAttemptTime < 500) {
+      return;
+    }
+
     if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) {
       return;
     }
 
+    // Reset connection state
+    this.connectionAttemptTime = now;
     this.isConnecting = true;
+    this.isConnectionReady = false;
 
     try {
       const wsUrl = `ws://${window.location.hostname}:8000/ws`;
+      
+      // Check if we're in a browser environment
+      if (typeof WebSocket === 'undefined') {
+        throw new Error('WebSocket not supported in this environment');
+      }
+      
       this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
-        console.log('WebSocket connected');
-        this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        this.sendHello();
-        this.startHeartbeat();
-        this.emit('connected', {});
-      };
 
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           this.handleMessage(data);
         } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
+          // Only log parsing errors in development
+          if ((import.meta as any).env?.DEV) {
+            console.error('Failed to parse WebSocket message:', error);
+          }
         }
       };
 
-      this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        this.isConnecting = false;
-        this.stopHeartbeat();
-        this.emit('disconnected', {});
-        
-        // Attempt to reconnect
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-          setTimeout(() => {
-            this.reconnectAttempts++;
-            this.connect();
-          }, this.reconnectDelay * this.reconnectAttempts);
-        }
+      this.ws.onclose = (event) => {
+        this.handleConnectionClose(event);
       };
 
       this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // Only log WebSocket errors in development
+        if ((import.meta as any).env?.DEV) {
+          console.error('WebSocket error:', error);
+        }
         this.isConnecting = false;
         this.emit('error', error);
       };
 
+      // Add connection timeout
+      this.connectionTimeout = setTimeout(() => {
+        if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+          // Only log timeout errors in development
+          if ((import.meta as any).env?.DEV) {
+            console.error('WebSocket connection timeout');
+          }
+          this.ws.close();
+          this.isConnecting = false;
+          this.emit('error', new Error('WebSocket connection timeout'));
+        }
+      }, 10000); // 10 second timeout
+
+      this.ws.onopen = () => {
+        this.handleConnectionOpen();
+      };
+
     } catch (error) {
-      console.error('Failed to connect to WebSocket:', error);
+      // Only log connection errors in development
+      if ((import.meta as any).env?.DEV) {
+        console.error('Failed to connect to WebSocket:', error);
+      }
       this.isConnecting = false;
       this.emit('error', error);
+    }
+  }
+
+  private handleConnectionOpen(): void {
+    if (this.connectionTimeout) {
+      clearTimeout(this.connectionTimeout);
+    }
+    this.isConnecting = false;
+    this.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+    
+    // Reduced delay to ensure connection is fully established
+    setTimeout(() => {
+      this.sendHello();
+      this.startHeartbeat();
+    }, 50); // Reduced from 100ms to 50ms
+    
+    this.emit('connected', {});
+  }
+
+  private handleConnectionClose(event: CloseEvent): void {
+    this.isConnecting = false;
+    this.isConnectionReady = false;
+    this.stopHeartbeat();
+    this.emit('disconnected', {});
+    
+    // Always attempt to reconnect unless it was a manual disconnect
+    if (event.code !== 1000) {
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+        setTimeout(() => {
+          this.reconnectAttempts++;
+          this.emit('connecting', {});
+          this.connect();
+        }, delay);
+      } else {
+        this.emit('error', new Error('Failed to reconnect to WebSocket'));
+      }
     }
   }
 
   // Send HELLO message
   private sendHello(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      // Refresh identity to ensure we have the latest
+      this.identity = getUserIdentity();
+      
       const helloMessage: WebSocketMessage = {
         type: 'HELLO',
         display_name: this.identity.displayName,
-        user_id: this.identity.id
+        user_id: this.identity.id,
+        session_id: this.identity.sessionId // Include session ID for unique tab identification
       };
+      
       this.ws.send(JSON.stringify(helloMessage));
     }
   }
@@ -139,10 +206,12 @@ class WebSocketClient {
   // Handle incoming messages
   private handleMessage(data: any): void {
     const { type, ...payload } = data;
-    const chatStore = useChatStore.getState();
+    // const chatStore = useChatStore.getState();
 
     switch (type) {
       case 'HELLO_ACK':
+        this.isConnectionReady = true;
+        this.processMessageQueue();
         this.emit('hello_ack', payload);
         break;
       case 'PRESENCE':
@@ -160,32 +229,52 @@ class WebSocketClient {
       case 'ERROR':
         this.handleError(payload);
         break;
+      case 'PING':
+        // Respond to PING with PONG for heartbeat
+        this.send({ type: 'PONG' });
+        break;
       case 'PONG':
         this.emit('pong', payload);
         break;
       default:
-        console.warn('Unknown message type:', type);
+        // Silently ignore unknown message types instead of warning
+        // This prevents console spam from unexpected message types
+        break;
     }
   }
 
   // Handle chat messages
   private handleChatMessage(payload: any): void {
-    const chatStore = useChatStore.getState();
+    // The backend now sends messages with sender_id and sender_name
+    const senderId = payload.sender_id;
+    const content = payload.content;
     
-    // Add received message to store
-    chatStore.addMessage({
-      from: payload.from,
-      to: payload.to,
-      content: payload.content,
-      status: 'sent'
-    });
-
-    // Send acknowledgment if message_id is provided
-    if (payload.message_id) {
-      this.send({
-        type: 'MSG_ACK',
-        message_id: payload.message_id
+    if (senderId && content) {
+      // Add received message to store
+      useChatStore.getState().addMessage({
+        from: senderId,
+        to: this.identity.id, // Current user
+        content: content,
+        status: 'sent'
       });
+      
+      // Don't automatically switch the selected user - let user manually select
+      // This prevents interrupting the user's current conversation
+      const currentSelectedUser = useChatStore.getState().selectedUser;
+      
+      // Only set selected user if no one is currently selected
+      if (!currentSelectedUser) {
+        useChatStore.getState().setSelectedUser({
+          user_id: senderId,
+          display_name: payload.sender_name || 'Unknown User',
+          online: true
+        });
+      }
+    } else {
+      // Only warn about invalid payloads in development
+      if ((import.meta as any).env?.DEV) {
+        console.warn('Invalid message payload:', payload);
+      }
     }
 
     this.emit('message', payload);
@@ -193,14 +282,37 @@ class WebSocketClient {
 
   // Handle typing indicators
   private handleTypingIndicator(payload: any): void {
-    const chatStore = useChatStore.getState();
-    chatStore.setTyping(payload.user_id, payload.is_typing);
+    // const chatStore = useChatStore.getState();
+    // The backend now sends typing indicators with user_id
+    const userId = payload.user_id;
+    if (userId) {
+      useChatStore.getState().setTyping(userId, payload.is_typing);
+    }
     this.emit('typing', payload);
   }
 
   // Handle errors
   private handleError(payload: any): void {
-    console.error('WebSocket error received:', payload);
+    // Don't emit rate limit errors as they're expected and handled gracefully
+    if (payload.error_code === 'RATE_LIMITED') {
+      if ((import.meta as any).env?.DEV) {
+        console.warn('Rate limit hit - this is normal behavior');
+      }
+      return;
+    }
+    
+    // Don't emit NOT_CONNECTED errors during initial connection
+    if (payload.error_code === 'NOT_CONNECTED' && !this.isConnectionReady) {
+      if ((import.meta as any).env?.DEV) {
+        console.warn('Connection not ready yet - this is normal during startup');
+      }
+      return;
+    }
+    
+    // Only log other WebSocket errors in development
+    if ((import.meta as any).env?.DEV) {
+      console.error('WebSocket error received:', payload);
+    }
     
     if (payload.type === 'VALIDATION') {
       this.emit('error', new Error(`Validation error: ${payload.message}`));
@@ -218,10 +330,64 @@ class WebSocketClient {
 
   // Send message
   send(message: WebSocketMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
+    // Don't send HELLO messages through the queue - they need to be sent immediately
+    if (message.type === 'HELLO') {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        try {
+          const messageStr = JSON.stringify(message);
+          this.ws.send(messageStr);
+        } catch (error) {
+          if ((import.meta as any).env?.DEV) {
+            console.error('Failed to send HELLO message:', error);
+          }
+        }
+      }
+      return;
+    }
+    
+    // For all other messages, check if connection is ready
+    if (this.ws?.readyState === WebSocket.OPEN && this.isConnectionReady) {
+      try {
+        const messageStr = JSON.stringify(message);
+        this.ws.send(messageStr);
+      } catch (error) {
+        // Only log send errors in development
+        if ((import.meta as any).env?.DEV) {
+          console.error('Failed to send message:', error);
+        }
+        this.queueMessage(message);
+      }
     } else {
-      console.warn('WebSocket not connected');
+      // Only warn about queueing in development
+      if ((import.meta as any).env?.DEV) {
+        console.warn('WebSocket not ready, queueing message');
+      }
+      this.queueMessage(message);
+    }
+  }
+
+  // Queue message for later sending
+  private queueMessage(message: WebSocketMessage): void {
+    this.messageQueue.push(message);
+  }
+
+  // Process queued messages
+  private processMessageQueue(): void {
+    while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN && this.isConnectionReady) {
+      const message = this.messageQueue.shift();
+      if (message) {
+        try {
+          this.ws.send(JSON.stringify(message));
+        } catch (error) {
+          // Only log queued message errors in development
+          if ((import.meta as any).env?.DEV) {
+            console.error('Failed to send queued message:', error);
+          }
+          // Put the message back at the front of the queue
+          this.messageQueue.unshift(message);
+          break;
+        }
+      }
     }
   }
 
@@ -236,12 +402,10 @@ class WebSocketClient {
   }
 
   // Send chat message
-  sendMessage(to: string, content: string, messageId?: string): void {
-    const message: ChatMessage = {
+  sendMessage(content: string): void {
+    const message = {
       type: 'MSG',
-      to,
-      content,
-      message_id: messageId
+      content
     };
     this.send(message);
   }
@@ -283,10 +447,23 @@ class WebSocketClient {
   // Disconnect
   disconnect(): void {
     this.stopHeartbeat();
-    if (this.ws) {
-      this.ws.close();
+    this.reconnectAttempts = this.maxReconnectAttempts; // Prevent auto-reconnect
+    this.isConnectionReady = false;
+    this.isConnecting = false; // Reset connecting state
+    this.messageQueue = []; // Clear queued messages
+    
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.ws.close(1000, 'Manual disconnect'); // Use proper close code
       this.ws = null;
     }
+  }
+
+  // Manual reconnect
+  reconnect(): void {
+    this.disconnect();
+    this.reconnectAttempts = 0; // Reset reconnect attempts for manual reconnect
+    this.messageQueue = []; // Clear any stale messages
+    this.connect();
   }
 
   // Get connection status

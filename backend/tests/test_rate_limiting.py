@@ -106,9 +106,9 @@ def test_reset_user_limits(rate_limiter):
     # Should be able to send messages again
     assert rate_limiter.check_rate_limit(user_id, "MSG") is True
     
-    # Info should show 0 messages
+    # Info should show 1 message (the one sent after reset)
     info = rate_limiter.get_rate_limit_info(user_id)
-    assert info["messages"] == 0
+    assert info["messages"] == 1
 
 def test_cleanup_old_timestamps(rate_limiter):
     """Test cleanup of old timestamps"""

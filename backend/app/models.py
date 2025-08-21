@@ -10,5 +10,6 @@ class UserOnline(Base):
     __tablename__ = "users_online"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=True, unique=True)  # Add user_id field
     display_name = Column(Text, nullable=False)
     last_seen = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

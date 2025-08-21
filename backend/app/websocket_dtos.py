@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
 
 
@@ -10,6 +10,8 @@ class MessageType(str, Enum):
     OPEN_CHAT = "OPEN_CHAT"
     MSG = "MSG"
     TYPING = "TYPING"
+    PING = "PING"
+    PONG = "PONG"
     ERROR = "ERROR"
     PRESENCE = "PRESENCE"
     CHAT_OPENED = "CHAT_OPENED"
@@ -25,6 +27,7 @@ class HelloMessage(BaseWebSocketMessage):
     type: MessageType = MessageType.HELLO
     display_name: str = Field(..., min_length=1, max_length=100)
     user_id: Optional[UUID] = None
+    session_id: Optional[str] = None  # Add session ID for unique tab identification
 
 
 class OpenChatMessage(BaseWebSocketMessage):
@@ -41,7 +44,8 @@ class ChatMessage(BaseWebSocketMessage):
     chat_id: UUID
     timestamp: Optional[str] = None
 
-    @validator('content')
+    @field_validator('content')
+    @classmethod
     def validate_content_length(cls, v):
         if len(v) > 1000:
             raise ValueError('Message content cannot exceed 1000 characters')

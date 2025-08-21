@@ -1,22 +1,52 @@
-# FastChat 🚀
+# FastChat 💬⚡
 
-Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**.
+A real-time 1:1 chat app built with **FastAPI**, **PostgreSQL**, and **React**.  
+Supports online presence, WebSocket messaging, and graceful disconnects — all with zero authentication or chat history.
 
-## Features
+<div align="center">
 
-- **Real-time messaging** via WebSocket
-- **Live presence tracking** (who's online)
-- **Typing indicators** and message status
-- **Professional UI** with Material-UI
-- **Auto-reconnection** with exponential backoff
-- **Responsive design** for all devices
-- **Rate limiting** protection against spam
-- **Real-time metrics** and performance monitoring
-- **Comprehensive testing** with pytest
-- **CI/CD pipeline** with GitHub Actions
-- **Production-ready** Docker deployment
+![FastChat Demo](https://img.shields.io/badge/FastChat-Live%20Demo-blue?style=for-the-badge&logo=fastapi)
+![Python](https://img.shields.io/badge/Python-3.12+-blue?style=flat&logo=python)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green?style=flat&logo=fastapi)
+![React](https://img.shields.io/badge/React-18+-blue?style=flat&logo=react)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-blue?style=flat&logo=postgresql)
 
-## Architecture
+[![CI/CD](https://github.com/yourusername/fastchat-app/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/fastchat-app/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+</div>
+
+## ✨ Features
+
+- **💬 Real-time messaging** via WebSocket
+- **👥 Live presence tracking** (who's online)
+- **⌨️ Typing indicators** and message status
+- **🎨 Professional UI** with Material-UI
+- **🔄 Auto-reconnection** with exponential backoff
+- **📱 Responsive design** for all devices
+- **🛡️ Rate limiting** protection against spam
+- **📊 Real-time metrics** and performance monitoring
+- **🧪 Comprehensive testing** with pytest
+- **🚀 CI/CD pipeline** with GitHub Actions
+- **🐳 Production-ready** Docker deployment
+
+## 🎯 Quick Demo
+
+<div align="center">
+
+**🚀 Try it now!** Open multiple browser tabs to test real-time chat:
+
+```bash
+# Start the app
+make up
+
+# Open in browser
+open http://localhost:3000
+```
+
+</div>
+
+## 🏗️ Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -32,7 +62,7 @@ Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**
 
 📖 **[Full Architecture Documentation](docs/chat_app_architecture.md)**
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 ### Backend
 
@@ -61,7 +91,7 @@ Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**
 - **Pytest** - Testing framework
 - **GitHub Actions** - CI/CD automation
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -70,7 +100,7 @@ Real-time chat application built with **FastAPI**, **PostgreSQL**, and **React**
 - PostgreSQL (Neon recommended)
 - Docker & Docker Compose
 
-### 🚀 Quick Start (5 minutes)
+### ⚡ Quick Start (5 minutes)
 
 1. **Clone and setup**
 

@@ -19,7 +19,7 @@ def test_health_db_endpoint(client: TestClient):
 def test_presence_heartbeat(client: TestClient):
     """Test presence heartbeat endpoint"""
     heartbeat_data = {
-        "user_id": "test-user-123",
+        "user_id": "123e4567-e89b-12d3-a456-426614174000",
         "display_name": "Test User"
     }
     response = client.post("/presence/heartbeat", json=heartbeat_data)

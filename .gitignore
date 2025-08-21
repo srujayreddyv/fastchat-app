@@ -1,5 +1,7 @@
 # Python
 .venv/
+venv/
+backend/venv/
 __pycache__/
 *.pyc
 *.pyo
@@ -8,6 +10,12 @@ __pycache__/
 
 # Environment
 .env
+.env.local
+.env.development
+.env.test
+.env.production
+frontend/.env
+backend/.env
 
 # Node / React
 node_modules/

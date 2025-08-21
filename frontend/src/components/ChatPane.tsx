@@ -9,11 +9,12 @@ import {
   Chip,
   Alert,
   Snackbar,
-  CircularProgress,
-  Divider
+  CircularProgress
 } from '@mui/material';
 import { Send as SendIcon, Person as PersonIcon } from '@mui/icons-material';
 import { usePresenceStore } from '../stores/presence';
+import { useChatStore } from '../stores/chat';
+import { getUserIdentity } from '../utils/identity';
 
 interface Message {
   id: string;
@@ -35,6 +36,7 @@ interface ChatPaneProps {
   isTyping: boolean;
   onTyping: (isTyping: boolean) => void;
   connectionStatus: 'connected' | 'disconnected' | 'connecting';
+  isChatActive: boolean;
 }
 
 const ChatPane: React.FC<ChatPaneProps> = ({
@@ -43,14 +45,14 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   messages,
   isTyping,
   onTyping,
-  connectionStatus
+  connectionStatus,
+  // isChatActive - removed unused prop
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [showSnackbar, setShowSnackbar] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const typingTimeoutRef = useRef<number>();
 
   const { currentUser } = usePresenceStore();
 
@@ -59,7 +61,7 @@ const ChatPane: React.FC<ChatPaneProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Handle typing indicator
+  // Handle typing indicator with debouncing
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(e.target.value);
     
@@ -68,17 +70,24 @@ const ChatPane: React.FC<ChatPaneProps> = ({
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // Set typing indicator
-    onTyping(true);
+    // Only send typing indicator if we haven't sent one recently
+    const chatStore = useChatStore.getState();
+    const isCurrentlyTyping = chatStore.isUserTyping(getUserIdentity().id);
+    
+    if (!isCurrentlyTyping) {
+      onTyping(true);
+    }
 
-    // Clear typing indicator after 2 seconds of no input
+    // Clear typing indicator after 1.5 seconds of no input
     typingTimeoutRef.current = setTimeout(() => {
       onTyping(false);
-    }, 2000);
+    }, 1500);
   };
 
   const handleSendMessage = () => {
-    if (!inputValue.trim() || !selectedUser) return;
+    if (!inputValue.trim() || !selectedUser) {
+      return;
+    }
 
     onSendMessage(inputValue.trim());
     setInputValue('');
@@ -98,6 +107,8 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const isInputDisabled = !selectedUser || !selectedUser.online || connectionStatus !== 'connected';
+  
+  // ChatPane is ready for messaging
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -243,7 +254,11 @@ const ChatPane: React.FC<ChatPaneProps> = ({
             fullWidth
             multiline
             maxRows={4}
-            placeholder={isInputDisabled ? "Can't send message..." : "Type a message..."}
+            placeholder={
+              !selectedUser.online ? "User is offline..." :
+              connectionStatus !== 'connected' ? "Connecting..." :
+              "Type a message..."
+            }
             value={inputValue}
             onChange={handleInputChange}
             onKeyPress={handleKeyPress}
@@ -274,7 +289,7 @@ const ChatPane: React.FC<ChatPaneProps> = ({
           severity="error"
           sx={{ width: '100%' }}
         >
-          {snackbarMessage}
+          An error occurred
         </Alert>
       </Snackbar>
     </Paper>

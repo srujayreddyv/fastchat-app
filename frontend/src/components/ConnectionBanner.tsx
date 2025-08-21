@@ -1,10 +1,15 @@
 import React from 'react';
-import { Alert, Box, Typography } from '@mui/material';
-import { Wifi, WifiOff, HourglassEmpty } from '@mui/icons-material';
+import { Alert, Box, Typography, Button } from '@mui/material';
+import { Wifi, WifiOff, HourglassEmpty, Refresh } from '@mui/icons-material';
 import { usePresenceStore } from '../stores/presence';
+import { websocketClient } from '../services/websocket';
 
 const ConnectionBanner: React.FC = () => {
   const { connectionStatus } = usePresenceStore();
+
+  const handleReconnect = () => {
+    websocketClient.reconnect();
+  };
 
   const getStatusConfig = () => {
     switch (connectionStatus) {
@@ -12,25 +17,29 @@ const ConnectionBanner: React.FC = () => {
         return {
           text: 'Connected',
           severity: 'success' as const,
-          icon: <Wifi />
+          icon: <Wifi />,
+          showReconnect: false
         };
       case 'connecting':
         return {
           text: 'Connecting...',
           severity: 'warning' as const,
-          icon: <HourglassEmpty />
+          icon: <HourglassEmpty />,
+          showReconnect: false
         };
       case 'disconnected':
         return {
           text: 'Disconnected',
           severity: 'error' as const,
-          icon: <WifiOff />
+          icon: <WifiOff />,
+          showReconnect: true
         };
       default:
         return {
           text: 'Unknown',
           severity: 'info' as const,
-          icon: <WifiOff />
+          icon: <WifiOff />,
+          showReconnect: false
         };
     }
   };
@@ -42,6 +51,19 @@ const ConnectionBanner: React.FC = () => {
       <Alert 
         severity={config.severity}
         icon={config.icon}
+        action={
+          config.showReconnect ? (
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={<Refresh />}
+              onClick={handleReconnect}
+              sx={{ ml: 1 }}
+            >
+              Reconnect
+            </Button>
+          ) : undefined
+        }
         sx={{ 
           borderRadius: 0,
           '& .MuiAlert-message': {

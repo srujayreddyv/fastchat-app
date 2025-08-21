@@ -171,11 +171,15 @@ async def test_websocket_message_validation(connection_manager: ConnectionManage
     # Connect user
     await connection_manager.connect(mock_ws, user_id, "Test User")
     
+    # Create a chat session for the user
+    chat_id = uuid.uuid4()
+    connection_manager.chat_sessions[chat_id] = {user_id}
+    connection_manager.user_chats[user_id] = chat_id
+    
     # Test message too long
     long_message = "x" * 1001  # Exceeds max_message_length
     message_data = {
         "type": "MSG",
-        "chat_id": str(uuid.uuid4()),
         "content": long_message
     }
     

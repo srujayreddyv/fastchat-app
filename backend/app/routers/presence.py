@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..schemas import HeartbeatRequest, UserOnlineResponse, OnlineUsersResponse
@@ -20,10 +20,13 @@ def heartbeat(
 
 
 @router.get("/online", response_model=OnlineUsersResponse)
-def get_online_users(db: Session = Depends(get_db)):
+def get_online_users(
+    exclude_user_id: str = Query(None, description="User ID to exclude from results"),
+    db: Session = Depends(get_db)
+):
     """Get list of users active in the last 30 seconds"""
     try:
-        users = presence_service.get_online_users(db)
+        users = presence_service.get_online_users(db, exclude_user_id)
         return OnlineUsersResponse(users=users, count=len(users))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get online users: {str(e)}")

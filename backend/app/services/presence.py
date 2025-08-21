@@ -45,17 +45,35 @@ class PresenceService:
     
     def heartbeat(self, db: Session, request: HeartbeatRequest) -> UserOnlineResponse:
         """Update user's last seen timestamp"""
-        # Check if user already exists
-        user = db.query(UserOnline).filter(
-            UserOnline.display_name == request.display_name
-        ).first()
+        # Convert string user_id to UUID if provided
+        user_id_uuid = None
+        if request.user_id:
+            try:
+                from uuid import UUID
+                user_id_uuid = UUID(request.user_id)
+            except ValueError:
+                # If user_id is not a valid UUID, treat it as None
+                user_id_uuid = None
+        
+        # Check if user already exists by user_id if provided, otherwise by display_name
+        if user_id_uuid:
+            user = db.query(UserOnline).filter(
+                UserOnline.user_id == user_id_uuid
+            ).first()
+        else:
+            user = db.query(UserOnline).filter(
+                UserOnline.display_name == request.display_name
+            ).first()
         
         if user:
-            # Update existing user's last_seen
+            # Update existing user's last_seen and user_id if not set
             user.last_seen = datetime.utcnow()
+            if user_id_uuid and not user.user_id:
+                user.user_id = user_id_uuid
         else:
             # Create new user
             user = UserOnline(
+                user_id=user_id_uuid,
                 display_name=request.display_name,
                 last_seen=datetime.utcnow()
             )
@@ -64,17 +82,29 @@ class PresenceService:
         db.commit()
         db.refresh(user)
         
-        return UserOnlineResponse.from_orm(user)
+        return UserOnlineResponse.model_validate(user)
     
-    def get_online_users(self, db: Session) -> List[UserOnlineResponse]:
+    def get_online_users(self, db: Session, exclude_user_id: str = None) -> List[UserOnlineResponse]:
         """Get users active within the threshold period"""
         threshold_time = datetime.utcnow() - timedelta(seconds=self.online_threshold_seconds)
         
-        users = db.query(UserOnline).filter(
+        query = db.query(UserOnline).filter(
             UserOnline.last_seen >= threshold_time
-        ).order_by(UserOnline.last_seen.desc()).all()
+        )
         
-        return [UserOnlineResponse.from_orm(user) for user in users]
+        # Exclude specific user if provided
+        if exclude_user_id:
+            try:
+                from uuid import UUID
+                exclude_uuid = UUID(exclude_user_id)
+                query = query.filter(UserOnline.user_id != exclude_uuid)
+            except ValueError:
+                # If exclude_user_id is not a valid UUID, ignore the filter
+                pass
+        
+        users = query.order_by(UserOnline.last_seen.desc()).all()
+        
+        return [UserOnlineResponse.model_validate(user) for user in users]
     
     def prune_stale_users(self, db: Session) -> int:
         """Remove users who haven't been seen recently"""

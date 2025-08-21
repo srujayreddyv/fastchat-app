@@ -1,25 +1,42 @@
 import os
+import pathlib
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import StaticPool
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+project_root = pathlib.Path(__file__).parent.parent.parent
+load_dotenv(dotenv_path=project_root / ".env")
 
 # Get database URL from environment variable
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    # Convert postgres:// to postgresql:// for SQLAlchemy compatibility
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-# Create SQLAlchemy engine with Neon-specific configurations
+# Create SQLAlchemy engine with appropriate configuration
 if DATABASE_URL:
-    engine = create_engine(
-        DATABASE_URL,
-        poolclass=StaticPool,  # Use StaticPool for serverless environments
-        connect_args={
-            "sslmode": "require",  # Required for Neon
-        } if "neon" in DATABASE_URL else {}
-    )
+    if DATABASE_URL.startswith("sqlite"):
+        # SQLite configuration for local development
+        engine = create_engine(
+            DATABASE_URL,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool
+        )
+    elif DATABASE_URL.startswith("postgres://"):
+        # Convert postgres:// to postgresql:// for SQLAlchemy compatibility
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        engine = create_engine(
+            DATABASE_URL,
+            poolclass=StaticPool,  # Use StaticPool for serverless environments
+            connect_args={
+                "sslmode": "require",  # Required for Neon
+            } if "neon" in DATABASE_URL else {}
+        )
+    else:
+        # Default PostgreSQL configuration
+        engine = create_engine(
+            DATABASE_URL,
+            poolclass=StaticPool
+        )
 else:
     # Fallback for when DATABASE_URL is not set (e.g., during migrations)
     engine = None

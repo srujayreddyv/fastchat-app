@@ -4,9 +4,13 @@ export interface UserIdentity {
   id: string;
   displayName: string;
   createdAt: string;
+  sessionId?: string; // Add session ID for unique tab identification
 }
 
-const IDENTITY_KEY = 'fastchat_user_identity';
+// const IDENTITY_KEY = 'fastchat_user_identity'; // Removed unused constant
+const SESSION_ID_KEY = 'fastchat_session_id';
+const SESSION_USER_ID_KEY = 'fastchat_session_user_id';
+const SESSION_DISPLAY_NAME_KEY = 'fastchat_session_display_name';
 
 // Generate a random display name
 function generateRandomName(): string {
@@ -31,45 +35,57 @@ function generateRandomName(): string {
 
 // Get or create user identity
 export function getUserIdentity(): UserIdentity {
-  const stored = localStorage.getItem(IDENTITY_KEY);
+  // Check if we have a session-specific user ID
+  let sessionUserId = sessionStorage.getItem(SESSION_USER_ID_KEY);
   
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch (error) {
-      console.warn('Failed to parse stored identity, creating new one');
-    }
+  if (!sessionUserId) {
+    // Generate a unique user ID for this tab/session
+    sessionUserId = uuidv4();
+    sessionStorage.setItem(SESSION_USER_ID_KEY, sessionUserId);
   }
   
-  // Create new identity
-  const newIdentity: UserIdentity = {
-    id: uuidv4(),
-    displayName: generateRandomName(),
-    createdAt: new Date().toISOString()
-  };
+  // Check if we have a session-specific display name
+  let sessionDisplayName = sessionStorage.getItem(SESSION_DISPLAY_NAME_KEY);
   
-  localStorage.setItem(IDENTITY_KEY, JSON.stringify(newIdentity));
-  return newIdentity;
+  if (!sessionDisplayName) {
+    // Generate a unique display name for this tab/session
+    sessionDisplayName = generateRandomName();
+    sessionStorage.setItem(SESSION_DISPLAY_NAME_KEY, sessionDisplayName);
+  }
+  
+  // Generate unique session ID for this tab
+  let sessionId = sessionStorage.getItem(SESSION_ID_KEY);
+  if (!sessionId) {
+    sessionId = uuidv4();
+    sessionStorage.setItem(SESSION_ID_KEY, sessionId);
+  }
+  
+  // Return identity with session-specific user ID and display name
+  return {
+    id: sessionUserId, // Use session-specific user ID
+    displayName: sessionDisplayName, // Use session-specific display name
+    createdAt: new Date().toISOString(), // Always use current time for session
+    sessionId: sessionId
+  };
 }
 
 // Update display name
 export function updateDisplayName(newName: string): UserIdentity {
-  const identity = getUserIdentity();
-  const updatedIdentity: UserIdentity = {
-    ...identity,
-    displayName: newName
-  };
+  // Store the new display name in sessionStorage for this tab
+  sessionStorage.setItem(SESSION_DISPLAY_NAME_KEY, newName);
   
-  localStorage.setItem(IDENTITY_KEY, JSON.stringify(updatedIdentity));
-  return updatedIdentity;
+  // Get the current identity with the updated display name
+  return getUserIdentity();
 }
 
 // Clear identity (for logout)
 export function clearIdentity(): void {
-  localStorage.removeItem(IDENTITY_KEY);
+  sessionStorage.removeItem(SESSION_DISPLAY_NAME_KEY);
+  sessionStorage.removeItem(SESSION_ID_KEY);
+  sessionStorage.removeItem(SESSION_USER_ID_KEY);
 }
 
 // Check if identity exists
 export function hasIdentity(): boolean {
-  return localStorage.getItem(IDENTITY_KEY) !== null;
+  return sessionStorage.getItem(SESSION_DISPLAY_NAME_KEY) !== null;
 }

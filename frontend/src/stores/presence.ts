@@ -5,18 +5,21 @@ interface PresenceState {
   onlineUsers: OnlineUser[];
   connectionStatus: 'connecting' | 'connected' | 'disconnected';
   currentUser: OnlineUser | null;
+  isLoadingUsers: boolean;
   setOnlineUsers: (users: OnlineUser[]) => void;
   addOnlineUser: (user: OnlineUser) => void;
   removeOnlineUser: (userId: string) => void;
   updateConnectionStatus: (status: 'connecting' | 'connected' | 'disconnected') => void;
   setCurrentUser: (user: OnlineUser) => void;
+  setLoadingUsers: (loading: boolean) => void;
   clearPresence: () => void;
 }
 
-export const usePresenceStore = create<PresenceState>((set, get) => ({
+export const usePresenceStore = create<PresenceState>((set) => ({
   onlineUsers: [],
   connectionStatus: 'disconnected',
   currentUser: null,
+  isLoadingUsers: false,
 
   setOnlineUsers: (users: OnlineUser[]) => {
     set({ onlineUsers: users });
@@ -52,11 +55,16 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
     set({ currentUser: user });
   },
 
+  setLoadingUsers: (loading: boolean) => {
+    set({ isLoadingUsers: loading });
+  },
+
   clearPresence: () => {
     set({
       onlineUsers: [],
       connectionStatus: 'disconnected',
-      currentUser: null
+      currentUser: null,
+      isLoadingUsers: false
     });
   }
 }));
