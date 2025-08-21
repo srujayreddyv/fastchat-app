@@ -5,6 +5,8 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from ..websocket_manager import connection_manager
 from ..websocket_dtos import HelloMessage, ErrorMessage, MessageType
+import asyncio
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -13,79 +15,72 @@ router = APIRouter()
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time chat"""
-    logger.info("WebSocket endpoint called - before accept")
     user_id: Optional[UUID] = None
     display_name: str = ""
     
     try:
-        # Accept the WebSocket connection first
-        logger.info("About to accept WebSocket connection")
+        # Accept the WebSocket connection immediately
         await websocket.accept()
-        logger.info("WebSocket connection accepted")
-        logger.info("Starting WebSocket message processing...")
         
-        # Wait for HELLO message
+        # Wait for HELLO message with shorter timeout
         hello_received = False
-        while not hello_received:
+        timeout_counter = 0
+        max_timeout = 20  # Reduced from 50 to 20 (2 seconds timeout)
+        
+        while not hello_received and timeout_counter < max_timeout:
             try:
-                logger.info("Waiting for HELLO message...")
-                data = await websocket.receive_text()
-                logger.info(f"Received data: {data}")
+                # Use shorter timeout for faster response
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=0.05)
                 message_data = json.loads(data)
                 
                 if message_data.get("type") == MessageType.HELLO:
-                    logger.info(f"Processing HELLO message: {message_data}")
                     hello_msg = HelloMessage(**message_data)
                     display_name = hello_msg.display_name
                     user_id = hello_msg.user_id or uuid4()
                     session_id = hello_msg.session_id
                     
-                    logger.info(f"Connecting user {user_id} ({display_name}) to manager")
-                    # Connect to manager (but don't broadcast presence yet)
+                    # Connect to manager immediately
                     await connection_manager.connect_without_broadcast(websocket, user_id, display_name, session_id)
                     hello_received = True
                     
-                    logger.info(f"User {display_name} ({user_id}) sent HELLO")
-                    
-                    # Send acknowledgment first
+                    # Send acknowledgment immediately
                     await websocket.send_text(json.dumps({
                         "type": "HELLO_ACK",
                         "user_id": str(user_id),
                         "message": "Connected successfully"
                     }, default=str))
                     
-                    # Now broadcast presence update to other users
-                    await connection_manager.broadcast_presence_update("connect", user_id, display_name)
+                    # Broadcast presence update asynchronously (don't wait)
+                    asyncio.create_task(connection_manager.broadcast_presence_update("connect", user_id, display_name))
+                    break  # Exit the loop immediately after successful HELLO
                 else:
                     # Send error for non-HELLO message
-                    try:
-                        error_msg = ErrorMessage(
-                            error_code="HELLO_REQUIRED",
-                            message="HELLO message must be sent first"
-                        )
-                        await websocket.send_text(json.dumps(error_msg.model_dump(), default=str))
-                    except WebSocketDisconnect:
-                        logger.info("WebSocket disconnected during HELLO error")
-                        return
-                    except Exception as e:
-                        logger.error(f"Failed to send HELLO error: {e}")
-                        return
-                    return  # Close connection after error
-                    
-            except json.JSONDecodeError:
-                try:
                     error_msg = ErrorMessage(
-                        error_code="INVALID_JSON",
-                        message="Invalid JSON format"
+                        error_code="HELLO_REQUIRED",
+                        message="HELLO message must be sent first"
                     )
                     await websocket.send_text(json.dumps(error_msg.model_dump(), default=str))
-                except WebSocketDisconnect:
-                    logger.info("WebSocket disconnected during JSON decode error")
-                    return
-                except Exception as e:
-                    logger.error(f"Failed to send JSON decode error: {e}")
-                    return
+                    return  # Close connection after error
+                    
+            except asyncio.TimeoutError:
+                timeout_counter += 1
+                continue
+            except json.JSONDecodeError:
+                error_msg = ErrorMessage(
+                    error_code="INVALID_JSON",
+                    message="Invalid JSON format"
+                )
+                await websocket.send_text(json.dumps(error_msg.model_dump(), default=str))
                 return  # Close connection after error
+        
+        if not hello_received:
+            # Send timeout error
+            error_msg = ErrorMessage(
+                error_code="HELLO_TIMEOUT",
+                message="HELLO message not received within timeout"
+            )
+            await websocket.send_text(json.dumps(error_msg.model_dump(), default=str))
+            return
         
         # Main message handling loop
         while True:
@@ -93,18 +88,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 data = await websocket.receive_text()
                 message_data = json.loads(data)
                 
-                # Handle ping/pong
-                if message_data.get("type") == "PING":
-                    await websocket.send_text(json.dumps({"type": "PONG"}, default=str))
-                    continue
-                
-                if message_data.get("type") == "PONG":
-                    # PONG response received, no action needed
-                    continue
-                
                 # Process message through manager
-                logger.info(f"Processing message through manager: {message_data}")
-                response = await connection_manager.handle_message(websocket, message_data)
+                # Only log in debug mode
+                if os.getenv("DEBUG", "false").lower() == "true":
+                    logger.info(f"Processing message through manager: {message_data}")
+                response = await connection_manager.handle_message(websocket, user_id, message_data)
                 
                 if response:
                     try:

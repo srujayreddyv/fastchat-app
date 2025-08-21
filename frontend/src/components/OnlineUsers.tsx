@@ -9,13 +9,11 @@ import {
   ListItemText, 
   Avatar, 
   Divider,
-  Box,
-  Button
+  Box
 } from '@mui/material';
 import { 
   Circle as CircleIcon, 
-  Person as PersonIcon,
-  Chat as ChatIcon 
+  Person as PersonIcon
 } from '@mui/icons-material';
 import { Badge, CircularProgress } from '@mui/material';
 import { usePresenceStore } from '../stores/presence';
@@ -28,6 +26,19 @@ const OnlineUsers: React.FC = () => {
   const { selectedUser, setSelectedUser, chatSessions } = useChatStore();
   const identity = getUserIdentity();
   
+  // Filter out current user from online users list
+  const filteredUsers = onlineUsers.filter(user => user.user_id !== identity.id);
+
+  // Auto-activate chat for users with unread messages
+  React.useEffect(() => {
+    const unreadUsers = filteredUsers.filter(user => getUnreadCount(user.user_id) > 0);
+    if (unreadUsers.length > 0 && !selectedUser) {
+      // Auto-select the first user with unread messages
+      const firstUnreadUser = unreadUsers[0];
+      handleUserClick(firstUnreadUser.user_id, firstUnreadUser.display_name);
+    }
+  }, [filteredUsers, selectedUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Count unread messages for each user
   const getUnreadCount = (userId: string) => {
     const session = chatSessions[userId];
@@ -60,94 +71,104 @@ const OnlineUsers: React.FC = () => {
     websocketClient.openChat(userId, displayName);
   };
 
-  // Double-check: filter out current user from online users list
-  const filteredUsers = onlineUsers.filter(user => user.user_id !== identity.id);
-
   return (
-    <Card elevation={2}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
+    <Card elevation={2} sx={{ 
+      height: { xs: '50vh', sm: '60vh', md: '70vh' }, 
+      overflow: 'hidden', 
+      display: 'flex', 
+      flexDirection: 'column' 
+    }}>
+      <CardContent sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', p: { xs: 1, sm: 2 } }}>
+        <Typography variant="h6" gutterBottom sx={{ 
+          mb: 2, 
+          pb: 1, 
+          borderBottom: 1, 
+          borderColor: 'divider',
+          fontSize: { xs: '1rem', sm: '1.25rem' }
+        }}>
           Online Users ({filteredUsers.length})
         </Typography>
         
         {isLoadingUsers ? (
-          <Box textAlign="center" py={3}>
+          <Box textAlign="center" py={3} sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <CircularProgress size={24} sx={{ mb: 1 }} />
             <Typography variant="body2" color="text.secondary">
               Loading users...
             </Typography>
           </Box>
         ) : filteredUsers.length === 0 ? (
-          <Box textAlign="center" py={3}>
+          <Box textAlign="center" py={3} sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <Typography variant="body2" color="text.secondary">
               No other users online
             </Typography>
           </Box>
         ) : (
-          <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
-            {filteredUsers.map((user) => (
-              <ListItem
-                key={user.user_id}
-                alignItems="center"
-                selected={selectedUser?.user_id === user.user_id}
-                sx={{ 
-                  cursor: 'pointer',
-                  '&:hover': { bgcolor: 'action.hover' },
-                  borderRadius: 1,
-                  mb: 1,
-                  '&.Mui-selected': {
-                    bgcolor: 'primary.light',
-                    '&:hover': {
+          <Box sx={{ flex: 1, overflow: 'auto' }}>
+            <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+              {filteredUsers.map((user) => (
+                <ListItem
+                  key={user.user_id}
+                  alignItems="center"
+                  selected={selectedUser?.user_id === user.user_id}
+                  sx={{ 
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    borderRadius: 1,
+                    mb: 1,
+                    px: 1,
+                    '&.Mui-selected': {
                       bgcolor: 'primary.light',
+                      '&:hover': {
+                        bgcolor: 'primary.light',
+                      }
                     }
-                  }
-                }}
-                onClick={() => handleUserClick(user.user_id, user.display_name)}
-              >
-                <ListItemAvatar>
-                  <Badge 
-                    badgeContent={getUnreadCount(user.user_id)} 
-                    color="error"
-                    invisible={getUnreadCount(user.user_id) === 0}
-                  >
-                    <Avatar sx={{ bgcolor: 'success.main', width: 32, height: 32 }}>
-                      <PersonIcon fontSize="small" />
-                    </Avatar>
-                  </Badge>
-                </ListItemAvatar>
-                <ListItemText
-                  primary={user.display_name}
-                  secondary={
-                    <React.Fragment>
-                      <CircleIcon sx={{ fontSize: 12, color: 'success.main', mr: 0.5, verticalAlign: 'middle' }} />
-                      <Typography component="span" variant="caption" color="text.secondary">
-                        Online
-                      </Typography>
-                    </React.Fragment>
-                  }
-                />
-                <Button
-                  size="small"
-                  startIcon={<ChatIcon />}
-                  variant="outlined"
-                  color="primary"
+                  }}
+                  onClick={() => handleUserClick(user.user_id, user.display_name)}
                 >
-                  Chat
-                </Button>
-              </ListItem>
-            ))}
-          </List>
+                  <ListItemAvatar>
+                    <Badge 
+                      badgeContent={getUnreadCount(user.user_id)} 
+                      color="error"
+                      invisible={getUnreadCount(user.user_id) === 0}
+                    >
+                      <Avatar sx={{ bgcolor: 'success.main', width: 32, height: 32 }}>
+                        <PersonIcon fontSize="small" />
+                      </Avatar>
+                    </Badge>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={user.display_name}
+                    secondary={
+                      <React.Fragment>
+                        <CircleIcon sx={{ fontSize: 12, color: 'success.main', mr: 0.5, verticalAlign: 'middle' }} />
+                        <Typography component="span" variant="caption" color="text.secondary">
+                          Online
+                        </Typography>
+                      </React.Fragment>
+                    }
+                    sx={{ 
+                      '& .MuiListItemText-primary': { 
+                        fontSize: '0.9rem', 
+                        fontWeight: selectedUser?.user_id === user.user_id ? 'bold' : 'normal' 
+                      },
+                      '& .MuiListItemText-secondary': { fontSize: '0.75rem' }
+                    }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
         )}
         
         <Divider sx={{ my: 2 }} />
         
         {/* Current user info */}
-        <Box display="flex" alignItems="center" gap={2}>
+        <Box display="flex" alignItems="center" gap={2} sx={{ pt: 1 }}>
           <Avatar sx={{ bgcolor: 'primary.main', width: 32, height: 32 }}>
             <PersonIcon fontSize="small" />
           </Avatar>
-          <Box>
-            <Typography variant="body2" fontWeight="medium">
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" fontWeight="medium" noWrap>
               You ({identity.displayName})
             </Typography>
             <Typography variant="caption" color="text.secondary">

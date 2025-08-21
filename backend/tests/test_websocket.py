@@ -57,7 +57,7 @@ async def test_websocket_hello_message(connection_manager: ConnectionManager):
         "display_name": display_name
     }
     
-    response = await connection_manager.handle_message(mock_ws, hello_data)
+    response = await connection_manager.handle_message(mock_ws, user_id, hello_data)
     # HELLO should not return a response (handled in router)
     assert response is None
 
@@ -80,7 +80,7 @@ async def test_websocket_open_chat(connection_manager: ConnectionManager):
         "target_display_name": "User 2"
     }
     
-    response = await connection_manager.handle_message(mock_ws1, open_chat_data)
+    response = await connection_manager.handle_message(mock_ws1, user1_id, open_chat_data)
     assert response is None
     
     # Check that chat was created
@@ -114,7 +114,7 @@ async def test_websocket_typing_indicator(connection_manager: ConnectionManager)
         "is_typing": True
     }
     
-    response = await connection_manager.handle_message(mock_ws1, typing_data)
+    response = await connection_manager.handle_message(mock_ws1, user1_id, typing_data)
     assert response is None
     
     # Check that typing indicator was set
@@ -153,7 +153,7 @@ async def test_websocket_chat_message(connection_manager: ConnectionManager):
         "timestamp": "2024-01-01T12:00:00Z"
     }
     
-    response = await connection_manager.handle_message(mock_ws1, message_data)
+    response = await connection_manager.handle_message(mock_ws1, user1_id, message_data)
     assert response is None
     
     # Check that other user received the message
@@ -183,7 +183,7 @@ async def test_websocket_message_validation(connection_manager: ConnectionManage
         "content": long_message
     }
     
-    response = await connection_manager.handle_message(mock_ws, message_data)
+    response = await connection_manager.handle_message(mock_ws, user_id, message_data)
     assert response is not None
     assert response["error_code"] == "VALIDATION"
 
@@ -198,7 +198,7 @@ async def test_websocket_ping_pong(connection_manager: ConnectionManager):
     
     # Test ping
     ping_data = {"type": "PING"}
-    response = await connection_manager.handle_message(mock_ws, ping_data)
+    response = await connection_manager.handle_message(mock_ws, user_id, ping_data)
     assert response is None
     
     # Check that pong was sent

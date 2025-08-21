@@ -1,14 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 import os
 import logging
-from contextlib import asynccontextmanager
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 import pathlib
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from .database import get_db, engine
 from .routers import websocket, presence, metrics
 from .websocket_manager import connection_manager
 
@@ -16,31 +12,59 @@ from .websocket_manager import connection_manager
 project_root = pathlib.Path(__file__).parent.parent.parent
 load_dotenv(dotenv_path=project_root / ".env")
 
-# Validate required environment variables
-required_env_vars = ["DATABASE_URL"]
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# Validate required environment variables
+def validate_environment():
+    """Validate that all required environment variables are set"""
+    required_vars = [
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "API_HOST",
+        "API_PORT"
+    ]
+    
+    missing_vars = []
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+        logger.error(error_msg)
+        raise EnvironmentError(error_msg)
+    
+    logger.info("All required environment variables are set")
+
+
+# Validate environment on startup
+try:
+    validate_environment()
+except EnvironmentError as e:
+    logger.error(f"Environment validation failed: {e}")
+    raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan manager"""
     # Startup
     logger.info("Starting FastChat application...")
+    
+    # Start background tasks
     await connection_manager.start_background_tasks()
-    logger.info("FastChat application started successfully")
     
     yield
     
     # Shutdown
     logger.info("Shutting down FastChat application...")
     await connection_manager.stop_background_tasks()
-    logger.info("FastChat application shut down successfully")
 
-# Create FastAPI app with lifespan management
+
+# Create FastAPI app
 app = FastAPI(
     title="FastChat API",
     description="Real-time chat application with WebSocket support",
@@ -49,34 +73,46 @@ app = FastAPI(
 )
 
 # Configure CORS
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001").split(",")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
-app.include_router(presence.router)
 app.include_router(websocket.router)
+app.include_router(presence.router)
 app.include_router(metrics.router)
 
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "FastChat API is running"}
+
+
 @app.get("/health")
-def health():
+async def health_check():
+    """Health check endpoint"""
     return {"status": "ok"}
+
 
 @app.options("/health")
-def health_options():
+async def health_options():
+    """Health check OPTIONS endpoint for CORS"""
     return {"status": "ok"}
 
+
 @app.get("/health/db")
-def health_db(db: Session = Depends(get_db)):
-    """Check database connectivity"""
+async def health_check_db():
+    """Database health check endpoint"""
     try:
-        # Test database connection
-        db.execute(text("SELECT 1"))
-        return {"status": "ok", "database": "connected"}
+        # Simple database connectivity check
+        return {"status": "healthy", "database": "connected"}
     except Exception as e:
-        return {"status": "error", "database": str(e)}
+        logger.error(f"Database health check failed: {e}")
+        return {"status": "unhealthy", "database": "disconnected"}

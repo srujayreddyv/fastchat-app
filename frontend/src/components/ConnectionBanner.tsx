@@ -1,84 +1,129 @@
 import React from 'react';
-import { Alert, Box, Typography, Button } from '@mui/material';
-import { Wifi, WifiOff, HourglassEmpty, Refresh } from '@mui/icons-material';
+import { Alert, Box, Chip, Typography } from '@mui/material';
 import { usePresenceStore } from '../stores/presence';
 import { websocketClient } from '../services/websocket';
 
 const ConnectionBanner: React.FC = () => {
   const { connectionStatus } = usePresenceStore();
+  const [networkStatus, setNetworkStatus] = React.useState<'online' | 'offline'>(
+    navigator.onLine ? 'online' : 'offline'
+  );
+  const [connectionInfo, setConnectionInfo] = React.useState<any>(null);
 
-  const handleReconnect = () => {
-    websocketClient.reconnect();
-  };
+  React.useEffect(() => {
+    // Monitor network status
+    const handleOnline = () => setNetworkStatus('online');
+    const handleOffline = () => setNetworkStatus('offline');
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    // Update connection info periodically
+    const updateConnectionInfo = () => {
+      setConnectionInfo(websocketClient.getConnectionInfo());
+    };
+    
+    updateConnectionInfo();
+    const interval = setInterval(updateConnectionInfo, 5000);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(interval);
+    };
+  }, []);
 
-  const getStatusConfig = () => {
+  // Don't show banner if connected and online
+  if (connectionStatus === 'connected' && networkStatus === 'online') {
+    return null;
+  }
+
+  const getBannerContent = () => {
+    if (networkStatus === 'offline') {
+      return {
+        severity: 'error' as const,
+        title: 'Network Offline',
+        message: 'You are currently offline. Messages will be queued and sent when you reconnect.',
+        showReconnect: false
+      };
+    }
+
     switch (connectionStatus) {
-      case 'connected':
-        return {
-          text: 'Connected',
-          severity: 'success' as const,
-          icon: <Wifi />,
-          showReconnect: false
-        };
       case 'connecting':
         return {
-          text: 'Connecting...',
           severity: 'warning' as const,
-          icon: <HourglassEmpty />,
+          title: 'Connecting...',
+          message: 'Attempting to connect to the chat server. This may take a few moments.',
           showReconnect: false
         };
       case 'disconnected':
         return {
-          text: 'Disconnected',
           severity: 'error' as const,
-          icon: <WifiOff />,
+          title: 'Connection Lost',
+          message: 'Connection to the chat server was lost. Attempting to reconnect automatically...',
           showReconnect: true
         };
       default:
         return {
-          text: 'Unknown',
           severity: 'info' as const,
-          icon: <WifiOff />,
+          title: 'Connection Status',
+          message: 'Checking connection status...',
           showReconnect: false
         };
     }
   };
 
-  const config = getStatusConfig();
+  const banner = getBannerContent();
 
   return (
-    <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000 }}>
-      <Alert 
-        severity={config.severity}
-        icon={config.icon}
-        action={
-          config.showReconnect ? (
-            <Button
-              color="inherit"
-              size="small"
-              startIcon={<Refresh />}
-              onClick={handleReconnect}
-              sx={{ ml: 1 }}
-            >
-              Reconnect
-            </Button>
-          ) : undefined
+    <Alert 
+      severity={banner.severity}
+      sx={{ 
+        position: 'fixed', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        zIndex: 1000,
+        borderRadius: 0,
+        '& .MuiAlert-message': {
+          width: '100%'
         }
-        sx={{ 
-          borderRadius: 0,
-          '& .MuiAlert-message': {
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%'
-          }
-        }}
-      >
-        <Typography variant="body2" fontWeight="medium">
-          {config.text}
-        </Typography>
-      </Alert>
-    </Box>
+      }}
+      action={
+        <Box display="flex" alignItems="center" gap={1}>
+          {banner.showReconnect && (
+            <Chip
+              label="Reconnect"
+              size="small"
+              color="primary"
+              variant="outlined"
+              onClick={() => websocketClient.reconnect()}
+              sx={{ cursor: 'pointer' }}
+            />
+          )}
+          {connectionInfo && (
+            <Chip
+              label={`Quality: ${connectionInfo.quality}`}
+              size="small"
+              color={connectionInfo.quality === 'excellent' ? 'success' : 
+                     connectionInfo.quality === 'good' ? 'warning' : 'error'}
+              variant="outlined"
+            />
+          )}
+        </Box>
+      }
+    >
+      <Box display="flex" alignItems="center" gap={2}>
+        <Box>
+          <Typography variant="subtitle2" fontWeight="bold">
+            {banner.title}
+          </Typography>
+          <Typography variant="body2">
+            {banner.message}
+          </Typography>
+        </Box>
+      </Box>
+    </Alert>
   );
 };
 

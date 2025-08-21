@@ -16,6 +16,10 @@ def heartbeat(
     try:
         return presence_service.heartbeat(db, request)
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Heartbeat endpoint error: {e}")
+        logger.error(f"Request data: {request}")
         raise HTTPException(status_code=500, detail=f"Failed to update heartbeat: {str(e)}")
 
 

@@ -3,7 +3,7 @@ import { useChatStore } from '../stores/chat';
 
 export interface WebSocketMessage {
   type: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface OnlineUser {
@@ -20,7 +20,7 @@ export interface ChatMessage {
   timestamp?: string;
 }
 
-export interface TypingMessage {
+export interface TypingMessage extends WebSocketMessage {
   type: 'TYPING';
   is_typing: boolean;
 }
@@ -32,12 +32,17 @@ export interface ChatSession {
   target_display_name: string;
 }
 
-export type WebSocketEventHandler = (data: any) => void;
+export interface WebSocketEventData {
+  type?: string;
+  [key: string]: unknown;
+}
+
+export type WebSocketEventHandler = (data: WebSocketEventData) => void;
 
 class WebSocketClient {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = Infinity; // Unlimited reconnection attempts
   private reconnectDelay = 1000;
   private heartbeatInterval: number | null = null;
   private eventHandlers: Map<string, WebSocketEventHandler[]> = new Map();
@@ -47,16 +52,175 @@ class WebSocketClient {
   private isConnectionReady = false;
   private connectionAttemptTime: number = 0;
   private connectionTimeout: number | null = null;
+  private failedMessages: Map<string, { message: WebSocketMessage; retries: number; timestamp: number }> = new Map();
+  private maxRetries = 3;
+  private retryDelay = 2000;
+  private connectionQuality: 'excellent' | 'good' | 'poor' | 'disconnected' = 'disconnected';
+  private lastPongTime: number = 0;
+  private pongLatency: number[] = [];
+  private connectionStartTime: number = 0;
+  private connectionTimes: number[] = [];
+  private statusPollingInterval: number | null = null;
+  
+  // Persistent connection features
+  private persistentMode = true; // Always try to stay connected
+  private connectionHealthCheck: number | null = null;
+  private lastActivityTime = Date.now();
+  private networkStatusListener: (() => void) | null = null;
+  private visibilityChangeListener: (() => void) | null = null;
+  private pageFocusListener: (() => void) | null = null;
+  
+  // Connection stability monitoring
+  private connectionDrops: number = 0;
+  private lastConnectionDrop: number = 0;
+  private connectionStabilityMonitor: number | null = null;
 
   constructor() {
     this.identity = getUserIdentity();
+    // Initialize persistent connection features lazily to avoid issues during page load
+    setTimeout(() => {
+      this.initializePersistentConnection();
+    }, 100);
+  }
+
+  private initializePersistentConnection(): void {
+    // Monitor network status changes
+    this.setupNetworkMonitoring();
+    
+    // Monitor page visibility changes
+    this.setupVisibilityMonitoring();
+    
+    // Monitor page focus changes
+    this.setupFocusMonitoring();
+    
+    // Start connection health checks
+    this.startConnectionHealthCheck();
+    
+    // Start connection stability monitoring
+    this.startConnectionStabilityMonitoring();
+  }
+
+  private setupNetworkMonitoring(): void {
+    if ('navigator' in window && 'onLine' in navigator) {
+      this.networkStatusListener = () => {
+        if (navigator.onLine) {
+          // Network came back online - try to reconnect
+          if ((import.meta as any).env?.DEV) {
+            console.log('Network is back online - attempting to reconnect');
+          }
+          this.reconnect();
+        } else {
+          // Network went offline
+          if ((import.meta as any).env?.DEV) {
+            console.log('Network went offline');
+          }
+          this.emit('network_offline', {});
+        }
+      };
+      
+      window.addEventListener('online', this.networkStatusListener);
+      window.addEventListener('offline', this.networkStatusListener);
+    }
+  }
+
+  private setupVisibilityMonitoring(): void {
+    this.visibilityChangeListener = () => {
+      if (document.visibilityState === 'visible') {
+        // Page became visible - check connection and reconnect if needed
+        if ((import.meta as any).env?.DEV) {
+          console.log('Page became visible - checking connection');
+        }
+        this.checkConnectionAndReconnect();
+      } else {
+        // Page became hidden - reduce activity but keep connection alive
+        if ((import.meta as any).env?.DEV) {
+          console.log('Page became hidden - reducing activity');
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', this.visibilityChangeListener);
+  }
+
+  private setupFocusMonitoring(): void {
+    this.pageFocusListener = () => {
+      // Page gained focus - check connection and reconnect if needed
+      if ((import.meta as any).env?.DEV) {
+        console.log('Page gained focus - checking connection');
+      }
+      this.checkConnectionAndReconnect();
+    };
+    
+    window.addEventListener('focus', this.pageFocusListener);
+  }
+
+  private startConnectionHealthCheck(): void {
+    // Check connection health every 60 seconds instead of 30
+    this.connectionHealthCheck = window.setInterval(() => {
+      this.checkConnectionHealth();
+    }, 60000);
+  }
+
+  private startConnectionStabilityMonitoring(): void {
+    // Monitor connection stability every 2 minutes
+    this.connectionStabilityMonitor = window.setInterval(() => {
+      this.checkConnectionStability();
+    }, 120000);
+  }
+
+  private checkConnectionStability(): void {
+    const now = Date.now();
+    const timeSinceLastDrop = now - this.lastConnectionDrop;
+    
+    // If we've had more than 3 drops in the last 10 minutes, log a warning
+    if (this.connectionDrops > 3 && timeSinceLastDrop < 600000) {
+      if ((import.meta as any).env?.DEV) {
+        console.warn(`Connection stability issue: ${this.connectionDrops} drops in the last 10 minutes`);
+      }
+    }
+    
+    // Reset drop counter if it's been more than 10 minutes since last drop
+    if (timeSinceLastDrop > 600000) {
+      this.connectionDrops = 0;
+    }
+  }
+
+  private checkConnectionHealth(): void {
+    const status = this.getConnectionStatus();
+    const now = Date.now();
+    
+    // If disconnected and in persistent mode, try to reconnect
+    if (status === 'disconnected' && this.persistentMode) {
+      if ((import.meta as any).env?.DEV) {
+        console.log('Connection health check: disconnected, attempting to reconnect');
+      }
+      this.reconnect();
+    }
+    
+    // Check if connection is stale (no activity for 5 minutes instead of 2)
+    if (status === 'connected' && (now - this.lastActivityTime) > 300000) {
+      if ((import.meta as any).env?.DEV) {
+        console.log('Connection health check: stale connection detected, sending ping');
+      }
+      this.send({ type: 'PING' });
+    }
+  }
+
+  private checkConnectionAndReconnect(): void {
+    const status = this.getConnectionStatus();
+    if (status === 'disconnected' && this.persistentMode) {
+      if ((import.meta as any).env?.DEV) {
+        console.log('Checking connection: disconnected, attempting to reconnect');
+      }
+      this.reconnect();
+    }
   }
 
   // Connect to WebSocket
   async connect(): Promise<void> {
-    // Prevent rapid reconnection attempts (within 500ms instead of 1000ms)
+    // Prevent rapid reconnection attempts (reduced from 200ms to 100ms)
     const now = Date.now();
-    if (now - this.connectionAttemptTime < 500) {
+    if (now - this.connectionAttemptTime < 100) {
       return;
     }
 
@@ -66,6 +230,7 @@ class WebSocketClient {
 
     // Reset connection state
     this.connectionAttemptTime = now;
+    this.connectionStartTime = now;
     this.isConnecting = true;
     this.isConnectionReady = false;
 
@@ -104,7 +269,7 @@ class WebSocketClient {
         this.emit('error', error);
       };
 
-      // Add connection timeout
+      // Reduced connection timeout from 5s to 3s
       this.connectionTimeout = setTimeout(() => {
         if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
           // Only log timeout errors in development
@@ -115,7 +280,7 @@ class WebSocketClient {
           this.isConnecting = false;
           this.emit('error', new Error('WebSocket connection timeout'));
         }
-      }, 10000); // 10 second timeout
+      }, 3000); // Reduced from 5 seconds to 3 seconds
 
       this.ws.onopen = () => {
         this.handleConnectionOpen();
@@ -135,35 +300,73 @@ class WebSocketClient {
     if (this.connectionTimeout) {
       clearTimeout(this.connectionTimeout);
     }
+    
+    // Track connection time
+    const connectionTime = Date.now() - this.connectionStartTime;
+    this.connectionTimes.push(connectionTime);
+    if (this.connectionTimes.length > 10) {
+      this.connectionTimes.shift();
+    }
+    
+    // Log connection performance
+    if ((import.meta as any).env?.DEV) {
+      console.log(`WebSocket connected in ${connectionTime}ms`);
+      const avgConnectionTime = this.connectionTimes.reduce((a, b) => a + b, 0) / this.connectionTimes.length;
+      console.log(`Average connection time: ${avgConnectionTime.toFixed(0)}ms`);
+      
+      // Warn if connection is taking too long
+      if (connectionTime > 2000) {
+        console.warn(`Slow connection detected: ${connectionTime}ms`);
+      }
+    }
+    
     this.isConnecting = false;
     this.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
     
-    // Reduced delay to ensure connection is fully established
-    setTimeout(() => {
-      this.sendHello();
-      this.startHeartbeat();
-    }, 50); // Reduced from 100ms to 50ms
+    // Send HELLO immediately without delay
+    this.sendHello();
+    this.startHeartbeat();
+    this.startRetryMechanism(); // Start retry mechanism on successful connection
+    this.startStatusPolling(); // Start status polling
     
-    this.emit('connected', {});
+    // Don't emit connected here - wait for HELLO_ACK
+    // this.emit('connected', {});
   }
 
   private handleConnectionClose(event: CloseEvent): void {
     this.isConnecting = false;
     this.isConnectionReady = false;
     this.stopHeartbeat();
+    this.stopStatusPolling(); // Stop status polling
     this.emit('disconnected', {});
     
-    // Always attempt to reconnect unless it was a manual disconnect
-    if (event.code !== 1000) {
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-        setTimeout(() => {
-          this.reconnectAttempts++;
-          this.emit('connecting', {});
-          this.connect();
-        }, delay);
-      } else {
-        this.emit('error', new Error('Failed to reconnect to WebSocket'));
+    // Track connection drops for stability monitoring
+    this.connectionDrops++;
+    this.lastConnectionDrop = Date.now();
+    
+    if ((import.meta as any).env?.DEV) {
+      console.log(`Connection dropped (code: ${event.code}). Total drops: ${this.connectionDrops}`);
+    }
+    
+    // Always attempt to reconnect in persistent mode unless it was a manual disconnect
+    if (event.code !== 1000 && this.persistentMode) {
+      // Use exponential backoff with longer initial delay and max delay
+      const delay = Math.min(this.reconnectDelay * Math.pow(1.2, this.reconnectAttempts), 15000); // Max 15 seconds, gentler backoff
+      
+      if ((import.meta as any).env?.DEV) {
+        console.log(`Connection closed (code: ${event.code}), attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+      }
+      
+      setTimeout(() => {
+        this.reconnectAttempts++;
+        this.emit('connecting', {});
+        this.connect();
+      }, delay);
+    } else if (event.code === 1000) {
+      // Manual disconnect - reset reconnect attempts
+      this.reconnectAttempts = 0;
+      if ((import.meta as any).env?.DEV) {
+        console.log('Manual disconnect - not attempting to reconnect');
       }
     }
   }
@@ -181,7 +384,13 @@ class WebSocketClient {
         session_id: this.identity.sessionId // Include session ID for unique tab identification
       };
       
-      this.ws.send(JSON.stringify(helloMessage));
+      try {
+        this.ws.send(JSON.stringify(helloMessage));
+      } catch (error) {
+        if ((import.meta as any).env?.DEV) {
+          console.error('Failed to send HELLO message:', error);
+        }
+      }
     }
   }
 
@@ -204,37 +413,46 @@ class WebSocketClient {
   }
 
   // Handle incoming messages
-  private handleMessage(data: any): void {
-    const { type, ...payload } = data;
-    // const chatStore = useChatStore.getState();
-
-    switch (type) {
+  private handleMessage(data: WebSocketEventData): void {
+    // Update last activity time
+    this.lastActivityTime = Date.now();
+    
+    const messageType = data.type;
+    
+    switch (messageType) {
       case 'HELLO_ACK':
         this.isConnectionReady = true;
         this.processMessageQueue();
-        this.emit('hello_ack', payload);
+        this.emit('hello_ack', data);
+        // Emit connected event after HELLO_ACK to ensure proper status
+        this.emit('connected', data);
         break;
       case 'PRESENCE':
-        this.emit('presence', payload);
+        this.emit('presence', data);
         break;
       case 'CHAT_OPENED':
-        this.emit('chat_opened', payload);
+        this.emit('chat_opened', data);
         break;
       case 'MSG':
-        this.handleChatMessage(payload);
+        this.handleChatMessage(data);
+        // Send acknowledgment for received message
+        this.sendMessageAck(data.message_id as string);
+        break;
+      case 'MSG_ACK':
+        this.handleMessageAck(data);
         break;
       case 'TYPING':
-        this.handleTypingIndicator(payload);
+        this.handleTypingIndicator(data);
         break;
       case 'ERROR':
-        this.handleError(payload);
+        this.handleError(data);
         break;
       case 'PING':
         // Respond to PING with PONG for heartbeat
         this.send({ type: 'PONG' });
         break;
       case 'PONG':
-        this.emit('pong', payload);
+        this.handlePong(data);
         break;
       default:
         // Silently ignore unknown message types instead of warning
@@ -244,29 +462,34 @@ class WebSocketClient {
   }
 
   // Handle chat messages
-  private handleChatMessage(payload: any): void {
+  private handleChatMessage(payload: WebSocketEventData): void {
     // The backend now sends messages with sender_id and sender_name
-    const senderId = payload.sender_id;
-    const content = payload.content;
+    const senderId = payload.sender_id as string;
+    const content = payload.content as string;
+    const messageId = payload.message_id as string;
+    const timestamp = payload.timestamp as string;
     
     if (senderId && content) {
       // Add received message to store
       useChatStore.getState().addMessage({
         from: senderId,
-        to: this.identity.id, // Current user
+        to: this.identity.id, // Current user is the recipient
         content: content,
-        status: 'sent'
-      });
+        status: 'sent',
+        message_id: messageId,
+        timestamp: timestamp
+      } as any);
       
-      // Don't automatically switch the selected user - let user manually select
-      // This prevents interrupting the user's current conversation
+      // Don't automatically switch the selected user
+      // Let users manually choose when to switch between conversations
+      // This prevents disrupting ongoing conversations
       const currentSelectedUser = useChatStore.getState().selectedUser;
       
-      // Only set selected user if no one is currently selected
+      // Only switch if no user is currently selected (first message)
       if (!currentSelectedUser) {
         useChatStore.getState().setSelectedUser({
           user_id: senderId,
-          display_name: payload.sender_name || 'Unknown User',
+          display_name: payload.sender_name as string || 'Unknown User',
           online: true
         });
       }
@@ -281,18 +504,18 @@ class WebSocketClient {
   }
 
   // Handle typing indicators
-  private handleTypingIndicator(payload: any): void {
+  private handleTypingIndicator(payload: WebSocketEventData): void {
     // const chatStore = useChatStore.getState();
     // The backend now sends typing indicators with user_id
-    const userId = payload.user_id;
+    const userId = payload.user_id as string;
     if (userId) {
-      useChatStore.getState().setTyping(userId, payload.is_typing);
+      useChatStore.getState().setTyping(userId, payload.is_typing as boolean);
     }
     this.emit('typing', payload);
   }
 
   // Handle errors
-  private handleError(payload: any): void {
+  private handleError(payload: WebSocketEventData): void {
     // Don't emit rate limit errors as they're expected and handled gracefully
     if (payload.error_code === 'RATE_LIMITED') {
       if ((import.meta as any).env?.DEV) {
@@ -315,17 +538,158 @@ class WebSocketClient {
     }
     
     if (payload.type === 'VALIDATION') {
-      this.emit('error', new Error(`Validation error: ${payload.message}`));
+      this.emit('error', new Error(`Validation error: ${payload.message as string}`));
     } else if (payload.type === 'MESSAGE_FAILED') {
       // Update message status to error
       const chatStore = useChatStore.getState();
       if (payload.message_id) {
-        chatStore.updateMessageStatus(payload.message_id, 'error');
+        chatStore.updateMessageStatus(payload.message_id as string, 'error');
       }
-      this.emit('error', new Error(`Message failed: ${payload.message}`));
+      this.emit('error', new Error(`Message failed: ${payload.message as string}`));
     } else {
-      this.emit('error', new Error(payload.message || 'Unknown error'));
+      this.emit('error', new Error(payload.message as string || 'Unknown error'));
     }
+  }
+
+  // Send message acknowledgment
+  private sendMessageAck(messageId: string): void {
+    const ackMessage = {
+      type: 'MSG_ACK',
+      message_id: messageId,
+      status: 'received',
+      timestamp: new Date().toISOString()
+    };
+    this.send(ackMessage);
+  }
+
+  // Handle message acknowledgments
+  private handleMessageAck(data: WebSocketEventData): void {
+    const messageId = data.message_id as string;
+    const status = data.status as string;
+    
+    if (messageId) {
+      // Update message status in chat store
+      useChatStore.getState().updateMessageStatus(messageId, status === 'delivered' ? 'sent' : 'pending');
+    }
+    
+    this.emit('message_ack', data);
+  }
+
+  // Retry failed messages
+  private retryFailedMessages(): void {
+    const now = Date.now();
+    for (const [messageId, failedMessage] of this.failedMessages.entries()) {
+      if (now - failedMessage.timestamp > this.retryDelay && failedMessage.retries < this.maxRetries) {
+        // Retry the message
+        failedMessage.retries++;
+        failedMessage.timestamp = now;
+        
+        if (this.ws?.readyState === WebSocket.OPEN && this.isConnectionReady) {
+          try {
+            this.ws.send(JSON.stringify(failedMessage.message));
+          } catch (error) {
+            if ((import.meta as any).env?.DEV) {
+              console.error('Failed to retry message:', error);
+            }
+          }
+        }
+      } else if (failedMessage.retries >= this.maxRetries) {
+        // Mark message as permanently failed
+        const chatStore = useChatStore.getState();
+        chatStore.updateMessageStatus(messageId, 'error');
+        this.failedMessages.delete(messageId);
+      }
+    }
+  }
+
+  // Start retry mechanism
+  private startRetryMechanism(): void {
+    setInterval(() => {
+      this.retryFailedMessages();
+    }, 5000); // Check every 5 seconds
+  }
+
+  // Start status polling
+  private startStatusPolling(): void {
+    if (this.statusPollingInterval) {
+      clearInterval(this.statusPollingInterval);
+    }
+    
+    this.statusPollingInterval = setInterval(() => {
+      const currentStatus = this.getConnectionStatus();
+      const actualStatus = this.getActualConnectionStatus();
+      
+      // If there's a mismatch, emit the correct status
+      if (currentStatus !== actualStatus) {
+        if ((import.meta as any).env?.DEV) {
+          console.log(`Status mismatch detected: ${currentStatus} vs ${actualStatus}`);
+        }
+        this.emit(actualStatus, {});
+      }
+    }, 5000); // Increased from 2 seconds to 5 seconds to reduce overhead
+  }
+
+  // Stop status polling
+  private stopStatusPolling(): void {
+    if (this.statusPollingInterval) {
+      clearInterval(this.statusPollingInterval);
+      this.statusPollingInterval = null;
+    }
+  }
+
+  // Get actual connection status based on WebSocket state
+  private getActualConnectionStatus(): 'connecting' | 'connected' | 'disconnected' {
+    if (this.isConnecting) return 'connecting';
+    if (this.ws?.readyState === WebSocket.OPEN && this.isConnectionReady) return 'connected';
+    return 'disconnected';
+  }
+
+  // Monitor connection quality
+  private updateConnectionQuality(): void {
+    if (this.pongLatency.length === 0) {
+      this.connectionQuality = 'disconnected';
+      return;
+    }
+
+    const avgLatency = this.pongLatency.reduce((a, b) => a + b, 0) / this.pongLatency.length;
+    
+    if (avgLatency < 100) {
+      this.connectionQuality = 'excellent';
+    } else if (avgLatency < 300) {
+      this.connectionQuality = 'good';
+    } else {
+      this.connectionQuality = 'poor';
+    }
+  }
+
+  // Get connection quality
+  getConnectionQuality(): 'excellent' | 'good' | 'poor' | 'disconnected' {
+    return this.connectionQuality;
+  }
+
+  // Handle pong with latency tracking
+  private handlePong(payload: WebSocketEventData): void {
+    const now = Date.now();
+    this.lastPongTime = now;
+    
+    // Calculate latency if we have a ping time
+    if (this.connectionStartTime > 0) {
+      const latency = now - this.connectionStartTime;
+      this.pongLatency.push(latency);
+      
+      // Keep only last 10 latency measurements
+      if (this.pongLatency.length > 10) {
+        this.pongLatency.shift();
+      }
+      
+      this.updateConnectionQuality();
+      
+      if ((import.meta as any).env?.DEV) {
+        console.log(`PONG received, latency: ${latency}ms, avg: ${this.getAverageLatency()}ms`);
+      }
+    }
+    
+    this.emit('pong', payload);
   }
 
   // Send message
@@ -437,24 +801,64 @@ class WebSocketClient {
     }
   }
 
-  private emit(event: string, data: any): void {
+  private emit(event: string, data: WebSocketEventData | Event | Error | unknown): void {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
-      handlers.forEach(handler => handler(data));
+      handlers.forEach(handler => handler(data as WebSocketEventData));
     }
   }
 
   // Disconnect
   disconnect(): void {
     this.stopHeartbeat();
+    this.stopStatusPolling(); // Stop status polling
+    this.stopConnectionHealthCheck(); // Stop health checks
+    this.stopConnectionStabilityMonitoring(); // Stop stability monitoring
+    this.cleanupEventListeners(); // Clean up event listeners
     this.reconnectAttempts = this.maxReconnectAttempts; // Prevent auto-reconnect
     this.isConnectionReady = false;
     this.isConnecting = false; // Reset connecting state
     this.messageQueue = []; // Clear queued messages
+    this.persistentMode = false; // Disable persistent mode for manual disconnect
     
     if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
       this.ws.close(1000, 'Manual disconnect'); // Use proper close code
       this.ws = null;
+    }
+  }
+
+  private stopConnectionHealthCheck(): void {
+    if (this.connectionHealthCheck) {
+      clearInterval(this.connectionHealthCheck);
+      this.connectionHealthCheck = null;
+    }
+  }
+
+  private stopConnectionStabilityMonitoring(): void {
+    if (this.connectionStabilityMonitor) {
+      clearInterval(this.connectionStabilityMonitor);
+      this.connectionStabilityMonitor = null;
+    }
+  }
+
+  private cleanupEventListeners(): void {
+    // Remove network status listeners
+    if (this.networkStatusListener) {
+      window.removeEventListener('online', this.networkStatusListener);
+      window.removeEventListener('offline', this.networkStatusListener);
+      this.networkStatusListener = null;
+    }
+    
+    // Remove visibility change listener
+    if (this.visibilityChangeListener) {
+      document.removeEventListener('visibilitychange', this.visibilityChangeListener);
+      this.visibilityChangeListener = null;
+    }
+    
+    // Remove page focus listener
+    if (this.pageFocusListener) {
+      window.removeEventListener('focus', this.pageFocusListener);
+      this.pageFocusListener = null;
     }
   }
 
@@ -463,14 +867,35 @@ class WebSocketClient {
     this.disconnect();
     this.reconnectAttempts = 0; // Reset reconnect attempts for manual reconnect
     this.messageQueue = []; // Clear any stale messages
+    this.persistentMode = true; // Re-enable persistent mode
+    this.initializePersistentConnection(); // Re-initialize persistent features
     this.connect();
   }
 
   // Get connection status
   getConnectionStatus(): 'connecting' | 'connected' | 'disconnected' {
     if (this.isConnecting) return 'connecting';
-    if (this.ws?.readyState === WebSocket.OPEN) return 'connected';
+    if (this.ws?.readyState === WebSocket.OPEN && this.isConnectionReady) return 'connected';
     return 'disconnected';
+  }
+
+  // Get average latency
+  private getAverageLatency(): number {
+    if (this.pongLatency.length === 0) return 0;
+    const sum = this.pongLatency.reduce((acc, latency) => acc + latency, 0);
+    return Math.round(sum / this.pongLatency.length);
+  }
+
+  // Get detailed connection info
+  getConnectionInfo() {
+    return {
+      status: this.getConnectionStatus(),
+      quality: this.getConnectionQuality(),
+      readyState: this.ws?.readyState,
+      isConnectionReady: this.isConnectionReady,
+      activeConnections: this.ws?.readyState === WebSocket.OPEN,
+      reconnectAttempts: this.reconnectAttempts
+    };
   }
 }
 

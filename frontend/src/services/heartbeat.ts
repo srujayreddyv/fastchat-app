@@ -12,18 +12,23 @@ export interface OnlineUser {
 class HeartbeatService {
   private intervalId: number | null = null;
   private isActiveFlag = false;
-  private identity = getUserIdentity();
+
+  // Get fresh identity each time instead of caching
+  private getIdentity() {
+    return getUserIdentity();
+  }
 
   async sendHeartbeat(): Promise<void> {
     try {
+      const identity = this.getIdentity();
       const response = await fetch(`${API_BASE_URL}/presence/heartbeat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          display_name: this.identity.displayName,
-          user_id: this.identity.id,
+          display_name: identity.displayName,
+          user_id: identity.id,
         }),
       });
 
@@ -41,7 +46,8 @@ class HeartbeatService {
   async getOnlineUsers(): Promise<OnlineUser[]> {
     try {
       // Pass the current user ID to exclude them from the results
-      const excludeUserId = this.identity.id;
+      const identity = this.getIdentity();
+      const excludeUserId = identity.id;
       
       const response = await fetch(`${API_BASE_URL}/presence/online?exclude_user_id=${excludeUserId}`, {
         method: 'GET',
@@ -71,7 +77,7 @@ class HeartbeatService {
     this.isActiveFlag = true;
     this.intervalId = setInterval(() => {
       this.sendHeartbeat();
-    }, 30000); // Send heartbeat every 30 seconds
+    }, 45000); // Send heartbeat every 45 seconds instead of 30
 
     // Send initial heartbeat
     this.sendHeartbeat();

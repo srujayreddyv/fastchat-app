@@ -1,29 +1,46 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  Box,
-  TextField,
-  IconButton,
-  Typography,
-  Paper,
-  Avatar,
-  Chip,
-  Alert,
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Box, 
+  Paper, 
+  TextField, 
+  IconButton, 
+  Typography, 
+  Avatar, 
   Snackbar,
-  CircularProgress
+  Alert
 } from '@mui/material';
 import { Send as SendIcon, Person as PersonIcon } from '@mui/icons-material';
-import { usePresenceStore } from '../stores/presence';
 import { useChatStore } from '../stores/chat';
+import { usePresenceStore } from '../stores/presence';
 import { getUserIdentity } from '../utils/identity';
+import { Message } from '../stores/chat';
 
-interface Message {
-  id: string;
-  from: string;
-  to: string;
-  content: string;
-  timestamp: Date;
-  status: 'sending' | 'sent' | 'error';
-}
+// Utility function to format timestamps consistently
+const formatMessageTime = (timestamp: Date): string => {
+  const now = new Date();
+  const messageDate = new Date(timestamp);
+  
+  // Check if it's today
+  const isToday = messageDate.toDateString() === now.toDateString();
+  
+  if (isToday) {
+    // Show time only for today's messages
+    return messageDate.toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  } else {
+    // Show date and time for older messages
+    return messageDate.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  }
+};
 
 interface ChatPaneProps {
   selectedUser: {
@@ -50,9 +67,11 @@ const ChatPane: React.FC<ChatPaneProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [showSnackbar, setShowSnackbar] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<number>();
+  const lastMessageCountRef = useRef<number>(0);
 
   const { currentUser } = usePresenceStore();
 
@@ -60,6 +79,20 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Show notification for new messages when chat is not active
+  useEffect(() => {
+    if (messages.length > lastMessageCountRef.current && selectedUser) {
+      const newMessages = messages.slice(lastMessageCountRef.current);
+      const unreadMessages = newMessages.filter(msg => msg.from !== currentUser?.user_id);
+      
+      if (unreadMessages.length > 0 && !document.hasFocus()) {
+        setNotificationMessage(`New message from ${selectedUser.display_name}`);
+        setShowSnackbar(true);
+      }
+    }
+    lastMessageCountRef.current = messages.length;
+  }, [messages, selectedUser, currentUser]);
 
   // Handle typing indicator with debouncing
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,14 +143,10 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   
   // ChatPane is ready for messaging
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
   const getMessageStatusIcon = (status: Message['status']) => {
     switch (status) {
       case 'sending':
-        return <CircularProgress size={12} />;
+        return <Typography variant="caption" color="text.secondary">⏳</Typography>;
       case 'sent':
         return <Typography variant="caption" color="text.secondary">✓</Typography>;
       case 'error':
@@ -129,9 +158,14 @@ const ChatPane: React.FC<ChatPaneProps> = ({
 
   if (!selectedUser) {
     return (
-      <Paper elevation={2} sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Paper elevation={2} sx={{ 
+        height: { xs: '50vh', sm: '60vh', md: '70vh' }, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center' 
+      }}>
         <Box textAlign="center">
-          <PersonIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+          <PersonIcon sx={{ fontSize: { xs: 48, sm: 56, md: 64 }, color: 'text.secondary', mb: 2 }} />
           <Typography variant="h6" color="text.secondary" gutterBottom>
             Select a user to start chatting
           </Typography>
@@ -144,75 +178,75 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   }
 
   return (
-    <Paper elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Paper elevation={2} sx={{ 
+      height: { xs: '50vh', sm: '60vh', md: '70vh' }, 
+      display: 'flex', 
+      flexDirection: 'column' 
+    }}>
       {/* Chat Header */}
-      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-        <Box display="flex" alignItems="center" gap={2}>
-          <Avatar sx={{ bgcolor: selectedUser.online ? 'success.main' : 'grey.500' }}>
-            {selectedUser.display_name.charAt(0).toUpperCase()}
-          </Avatar>
-          <Box flex={1}>
-            <Typography variant="h6" component="h2">
-              {selectedUser.display_name}
-            </Typography>
-            <Box display="flex" alignItems="center" gap={1}>
-              <Chip
-                label={selectedUser.online ? 'Online' : 'Offline'}
-                size="small"
-                color={selectedUser.online ? 'success' : 'default'}
-                variant="outlined"
-              />
-              {connectionStatus !== 'connected' && (
-                <Chip
-                  label={`${connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1)}`}
-                  size="small"
-                  color="warning"
-                  variant="outlined"
-                />
-              )}
-            </Box>
-          </Box>
+      <Box sx={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: 1, 
+        p: 2, 
+        borderBottom: 1, 
+        borderColor: 'divider',
+        flexShrink: 0
+      }}>
+        <Avatar sx={{ bgcolor: 'success.main', width: 32, height: 32 }}>
+          <PersonIcon fontSize="small" />
+        </Avatar>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="subtitle1" fontWeight="medium">
+            {selectedUser.display_name}
+          </Typography>
+          <Typography variant="caption" color="success.main" display="flex" alignItems="center" gap={0.5}>
+            <Box component="span" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'success.main' }} />
+            Online
+          </Typography>
         </Box>
       </Box>
 
       {/* Messages Area */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
         {messages.length === 0 ? (
-          <Box textAlign="center" sx={{ mt: 4 }}>
+          <Box textAlign="center" sx={{ mt: 4, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <Typography variant="body2" color="text.secondary">
               No messages yet. Start the conversation!
             </Typography>
           </Box>
         ) : (
-          messages.map((message) => (
-            <Box
-              key={message.id}
-              display="flex"
-              justifyContent={message.from === currentUser?.user_id ? 'flex-end' : 'flex-start'}
-              mb={1}
-            >
+          messages.map((message) => {
+            return (
               <Box
-                sx={{
-                  maxWidth: '70%',
-                  p: 1.5,
-                  borderRadius: 2,
-                  bgcolor: message.from === currentUser?.user_id ? 'primary.main' : 'grey.100',
-                  color: message.from === currentUser?.user_id ? 'white' : 'text.primary',
-                  position: 'relative'
-                }}
+                key={message.id}
+                display="flex"
+                justifyContent={message.from === currentUser?.user_id ? 'flex-end' : 'flex-start'}
+                mb={1}
               >
-                <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
-                  {message.content}
-                </Typography>
-                <Box display="flex" alignItems="center" gap={0.5} mt={0.5}>
-                  <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                    {formatTime(message.timestamp)}
+                <Box
+                  sx={{
+                    maxWidth: '70%',
+                    p: 1.5,
+                    borderRadius: 2,
+                    bgcolor: message.from === currentUser?.user_id ? 'primary.main' : 'grey.100',
+                    color: message.from === currentUser?.user_id ? 'white' : 'text.primary',
+                    position: 'relative'
+                  }}
+                >
+                  <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
+                    {message.content}
                   </Typography>
-                  {message.from === currentUser?.user_id && getMessageStatusIcon(message.status)}
+                  <Box display="flex" alignItems="center" gap={0.5} mt={0.5}>
+                    <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                      {formatMessageTime(message.timestamp)}
+                    </Typography>
+                    {message.from === currentUser?.user_id && getMessageStatusIcon(message.status)}
+                  </Box>
                 </Box>
               </Box>
-            </Box>
-          ))
+            );
+          })
         )}
         
         {/* Typing Indicator */}
@@ -228,7 +262,6 @@ const ChatPane: React.FC<ChatPaneProps> = ({
                 gap: 1
               }}
             >
-              <CircularProgress size={16} />
               <Typography variant="body2" color="text.secondary">
                 {selectedUser.display_name} is typing...
               </Typography>
@@ -241,13 +274,13 @@ const ChatPane: React.FC<ChatPaneProps> = ({
 
       {/* Offline Banner */}
       {!selectedUser.online && (
-        <Alert severity="warning" sx={{ mx: 2, mb: 2 }}>
+        <Alert severity="warning" sx={{ mx: 2, mb: 2, flexShrink: 0 }}>
           {selectedUser.display_name} is offline. Messages will be delivered when they come back online.
         </Alert>
       )}
 
       {/* Input Area */}
-      <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+      <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', flexShrink: 0 }}>
         <Box display="flex" gap={1}>
           <TextField
             ref={inputRef}
@@ -286,10 +319,10 @@ const ChatPane: React.FC<ChatPaneProps> = ({
       >
         <Alert
           onClose={() => setShowSnackbar(false)}
-          severity="error"
+          severity="info" // Changed to info for notifications
           sx={{ width: '100%' }}
         >
-          An error occurred
+          {notificationMessage}
         </Alert>
       </Snackbar>
     </Paper>

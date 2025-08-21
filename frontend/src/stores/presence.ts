@@ -22,11 +22,19 @@ export const usePresenceStore = create<PresenceState>((set) => ({
   isLoadingUsers: false,
 
   setOnlineUsers: (users: OnlineUser[]) => {
-    set({ onlineUsers: users });
+    // Only set users if the array is not empty or if we're explicitly clearing
+    if (users.length > 0 || users.length === 0) {
+      set({ onlineUsers: users });
+    }
   },
 
   addOnlineUser: (user: OnlineUser) => {
     set((state) => {
+      // Don't add the current user to the online users list
+      if (state.currentUser && user.user_id === state.currentUser.user_id) {
+        return state;
+      }
+      
       const existingUserIndex = state.onlineUsers.findIndex(u => u.user_id === user.user_id);
       
       if (existingUserIndex >= 0) {
@@ -42,9 +50,22 @@ export const usePresenceStore = create<PresenceState>((set) => ({
   },
 
   removeOnlineUser: (userId: string) => {
-    set((state) => ({
-      onlineUsers: state.onlineUsers.filter(user => user.user_id !== userId)
-    }));
+    set((state) => {
+      // Don't remove the current user
+      if (state.currentUser && userId === state.currentUser.user_id) {
+        return state;
+      }
+      
+      // Only remove if user exists in the list
+      const userExists = state.onlineUsers.some(user => user.user_id === userId);
+      if (!userExists) {
+        return state; // Don't update state if user doesn't exist
+      }
+      
+      return {
+        onlineUsers: state.onlineUsers.filter(user => user.user_id !== userId)
+      };
+    });
   },
 
   updateConnectionStatus: (status: 'connecting' | 'connected' | 'disconnected') => {

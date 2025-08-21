@@ -11,7 +11,7 @@ export interface Message {
   to: string;
   content: string;
   timestamp: Date;
-  status: 'sending' | 'sent' | 'error';
+  status: 'sending' | 'sent' | 'pending' | 'error';
 }
 
 export interface ChatSession {
@@ -49,16 +49,30 @@ interface ChatStore extends ChatState {
   saveChatState: () => void;
   loadChatState: () => void;
   restoreActiveChat: () => Promise<void>;
+  sortAllMessages: () => void;
 }
 
 // Helper functions for persistence
 const saveToChatStorage = (state: ChatState) => {
   try {
-    const chatState = {
+    // Sort all messages before saving
+    const sortedState = {
       selectedUser: state.selectedUser,
-      chatSessions: state.chatSessions
+      chatSessions: { ...state.chatSessions }
     };
-    sessionStorage.setItem(CHAT_STATE_KEY, JSON.stringify(chatState));
+    
+    // Sort messages in each session
+    Object.keys(sortedState.chatSessions).forEach((userId) => {
+      const session = sortedState.chatSessions[userId];
+      if (session.messages && session.messages.length > 0) {
+        sortedState.chatSessions[userId] = {
+          ...session,
+          messages: [...session.messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+        };
+      }
+    });
+    
+    sessionStorage.setItem(CHAT_STATE_KEY, JSON.stringify(sortedState));
   } catch (error) {
     if ((import.meta as any).env?.DEV) {
       console.error('Failed to save chat state:', error);
@@ -71,13 +85,15 @@ const loadFromChatStorage = (): Partial<ChatState> => {
     const stored = sessionStorage.getItem(CHAT_STATE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      // Restore message timestamps as Date objects
+      // Restore message timestamps as Date objects and sort them
       if (parsed.chatSessions) {
         Object.values(parsed.chatSessions).forEach((session: any) => {
           if (session.messages) {
             session.messages.forEach((msg: any) => {
               msg.timestamp = new Date(msg.timestamp);
             });
+            // Sort messages chronologically
+            session.messages.sort((a: any, b: any) => a.timestamp.getTime() - b.timestamp.getTime());
           }
         });
       }
@@ -132,11 +148,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     get().saveChatState();
   },
 
-  addMessage: (messageData) => {
+  addMessage: (messageData: Omit<Message, 'id' | 'timestamp'> & { message_id?: string; timestamp?: string }) => {
+    // Validate message data
+    if (!messageData.from || !messageData.to || !messageData.content) {
+      if ((import.meta as any).env?.DEV) {
+        console.error('Invalid message data:', messageData);
+      }
+      return;
+    }
+    
+    // Parse timestamp correctly
+    let timestamp: Date;
+    if (messageData.timestamp) {
+      // Handle both ISO string and Date object
+      if (typeof messageData.timestamp === 'string') {
+        // Parse ISO string - this will handle timezone information correctly
+        timestamp = new Date(messageData.timestamp);
+      } else {
+        timestamp = messageData.timestamp;
+      }
+    } else {
+      // For optimistic updates (sending), create a timestamp that will be consistent
+      // Use the same format as server timestamps to ensure consistency
+      timestamp = new Date();
+    }
+    
     const message: Message = {
       ...messageData,
-      id: uuidv4(),
-      timestamp: new Date(),
+      id: messageData.message_id || uuidv4(), // Use server message_id if available
+      timestamp: timestamp,
     };
 
     set((state) => {
@@ -144,8 +184,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const currentUserId = getUserIdentity().id;
       
       // Determine which user's chat session this message belongs to
-      // If I sent the message (from === currentUserId), add to recipient's session
-      // If I received the message (from !== currentUserId), add to sender's session
+      // For sent messages (from === currentUserId): add to recipient's session
+      // For received messages (from !== currentUserId): add to sender's session
       const otherUserId = messageData.from === currentUserId 
         ? messageData.to 
         : messageData.from;
@@ -153,12 +193,41 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const existingSession = state.chatSessions[otherUserId];
       
       if (existingSession) {
+        // Check if this is a server message that should replace an optimistic message
+        const existingMessageIndex = existingSession.messages.findIndex(msg => 
+          msg.content === message.content && 
+          msg.from === message.from && 
+          msg.status === 'sending' &&
+          !('message_id' in msg) // Optimistic messages don't have message_id property
+        );
+        
+        let updatedMessages;
+        if (existingMessageIndex >= 0 && messageData.message_id) {
+          // Replace optimistic message with server message
+          updatedMessages = [...existingSession.messages];
+          updatedMessages[existingMessageIndex] = message;
+          
+        } else {
+          // Add message to existing session and sort chronologically
+          updatedMessages = [...existingSession.messages, message];
+        }
+        
+        // Sort messages by timestamp (oldest first)
+        updatedMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        
+        // Remove duplicates based on message ID
+        const uniqueMessages = updatedMessages.filter((msg, index, self) => 
+          index === self.findIndex(m => m.id === msg.id)
+        );
+        
         return {
           chatSessions: {
             ...state.chatSessions,
             [otherUserId]: {
               ...existingSession,
-              messages: [...existingSession.messages, message],
+              messages: uniqueMessages,
+              // Auto-activate chat if it's a new message from someone else
+              isActive: messageData.from !== currentUserId ? true : existingSession.isActive,
             },
           },
         };
@@ -188,28 +257,31 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               display_name: displayName,
               messages: [message],
               isTyping: false,
-              isActive: true, // Auto-activate when we receive a message
+              isActive: messageData.from !== currentUserId, // Auto-activate for incoming messages
             },
           },
         };
       }
     });
+    
+    // Save state after adding message
+    get().saveChatState();
   },
 
-  updateMessageStatus: (messageId, status) => {
+  updateMessageStatus: (messageId: string, status: Message['status']) => {
     set((state) => {
       const updatedSessions = { ...state.chatSessions };
       
-      Object.keys(updatedSessions).forEach((userId) => {
+      Object.keys(updatedSessions).forEach(userId => {
         const session = updatedSessions[userId];
         const messageIndex = session.messages.findIndex(msg => msg.id === messageId);
         
-        if (messageIndex !== -1) {
+        if (messageIndex >= 0) {
           updatedSessions[userId] = {
             ...session,
-            messages: session.messages.map((msg, index) =>
+            messages: session.messages.map((msg, index) => 
               index === messageIndex ? { ...msg, status } : msg
-            ),
+            )
           };
         }
       });
@@ -235,9 +307,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
   },
 
-  getMessagesForUser: (userId) => {
+  getMessagesForUser: (userId: string) => {
     const session = get().chatSessions[userId];
-    return session ? session.messages : [];
+    if (!session) return [];
+    
+    // Ensure messages are sorted chronologically
+    return [...session.messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   },
 
   isUserTyping: (userId) => {
@@ -280,14 +355,39 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   loadChatState: () => {
-    const savedState = loadFromChatStorage();
-    if (savedState.selectedUser || savedState.chatSessions) {
+    const loadedState = loadFromChatStorage();
+    if (loadedState.chatSessions) {
       set((state) => ({
         ...state,
-        selectedUser: savedState.selectedUser || state.selectedUser,
-        chatSessions: savedState.chatSessions || state.chatSessions,
+        ...loadedState
       }));
+      
+      // Ensure all messages are sorted after loading
+      get().sortAllMessages();
+      
+      if ((import.meta as any).env?.DEV) {
+        console.log('Chat state loaded:', loadedState);
+      }
     }
+  },
+
+  // Sort all messages in all chat sessions
+  sortAllMessages: () => {
+    set((state) => {
+      const updatedSessions = { ...state.chatSessions };
+      
+      Object.keys(updatedSessions).forEach((userId) => {
+        const session = updatedSessions[userId];
+        if (session.messages && session.messages.length > 0) {
+          updatedSessions[userId] = {
+            ...session,
+            messages: [...session.messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          };
+        }
+      });
+      
+      return { chatSessions: updatedSessions };
+    });
   },
 
   restoreActiveChat: async () => {

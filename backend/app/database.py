@@ -26,7 +26,10 @@ if DATABASE_URL:
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
         engine = create_engine(
             DATABASE_URL,
-            poolclass=StaticPool,  # Use StaticPool for serverless environments
+            pool_size=10,  # Increased pool size for better concurrency
+            max_overflow=20,  # Allow more connections when pool is full
+            pool_pre_ping=True,  # Verify connections before use
+            pool_recycle=3600,  # Recycle connections every hour
             connect_args={
                 "sslmode": "require",  # Required for Neon
             } if "neon" in DATABASE_URL else {}
@@ -35,7 +38,10 @@ if DATABASE_URL:
         # Default PostgreSQL configuration
         engine = create_engine(
             DATABASE_URL,
-            poolclass=StaticPool
+            pool_size=10,
+            max_overflow=20,
+            pool_pre_ping=True,
+            pool_recycle=3600
         )
 else:
     # Fallback for when DATABASE_URL is not set (e.g., during migrations)
@@ -54,5 +60,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception as e:
+        db.rollback()
+        raise
     finally:
         db.close()

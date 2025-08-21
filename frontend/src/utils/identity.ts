@@ -11,6 +11,7 @@ export interface UserIdentity {
 const SESSION_ID_KEY = 'fastchat_session_id';
 const SESSION_USER_ID_KEY = 'fastchat_session_user_id';
 const SESSION_DISPLAY_NAME_KEY = 'fastchat_session_display_name';
+const SESSION_CREATED_AT_KEY = 'fastchat_session_created_at';
 
 // Generate a random display name
 function generateRandomName(): string {
@@ -60,11 +61,18 @@ export function getUserIdentity(): UserIdentity {
     sessionStorage.setItem(SESSION_ID_KEY, sessionId);
   }
   
+  // Get or create consistent timestamp for this session
+  let sessionCreatedAt = sessionStorage.getItem(SESSION_CREATED_AT_KEY);
+  if (!sessionCreatedAt) {
+    sessionCreatedAt = new Date().toISOString();
+    sessionStorage.setItem(SESSION_CREATED_AT_KEY, sessionCreatedAt);
+  }
+  
   // Return identity with session-specific user ID and display name
   return {
     id: sessionUserId, // Use session-specific user ID
     displayName: sessionDisplayName, // Use session-specific display name
-    createdAt: new Date().toISOString(), // Always use current time for session
+    createdAt: sessionCreatedAt, // Use consistent timestamp for session
     sessionId: sessionId
   };
 }
@@ -83,9 +91,31 @@ export function clearIdentity(): void {
   sessionStorage.removeItem(SESSION_DISPLAY_NAME_KEY);
   sessionStorage.removeItem(SESSION_ID_KEY);
   sessionStorage.removeItem(SESSION_USER_ID_KEY);
+  sessionStorage.removeItem(SESSION_CREATED_AT_KEY);
 }
 
 // Check if identity exists
 export function hasIdentity(): boolean {
   return sessionStorage.getItem(SESSION_DISPLAY_NAME_KEY) !== null;
+}
+
+// Get consistent timestamp for current session
+export function getSessionTimestamp(): string {
+  let sessionCreatedAt = sessionStorage.getItem(SESSION_CREATED_AT_KEY);
+  if (!sessionCreatedAt) {
+    sessionCreatedAt = new Date().toISOString();
+    sessionStorage.setItem(SESSION_CREATED_AT_KEY, sessionCreatedAt);
+  }
+  return sessionCreatedAt;
+}
+
+// Get current session info for debugging
+export function getSessionInfo(): { userId: string; displayName: string; sessionId: string; createdAt: string } {
+  const identity = getUserIdentity();
+  return {
+    userId: identity.id,
+    displayName: identity.displayName,
+    sessionId: identity.sessionId || 'unknown',
+    createdAt: identity.createdAt
+  };
 }
